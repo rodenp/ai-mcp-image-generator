@@ -281,8 +281,8 @@ export function ImageGeneratorForm() {
   ];
 
   return (
-    <div className="w-full mx-auto py-8 flex flex-col flex-grow"> {/* Added flex flex-col flex-grow */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-grow"> {/* Added flex-grow */}
+    <div className="w-full mx-auto pt-8 pb-2 flex flex-col flex-grow"> {/* Reduced pb-8 to pb-2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-grow">
         {/* Left Column: Prompt & Tips */}
         <div className="space-y-6 lg:col-span-1">
           <Card className="shadow-lg">
@@ -439,7 +439,7 @@ export function ImageGeneratorForm() {
       </div>
 
       {/* Alerts - Placed below the main 3-column grid, within the form's padded area */}
-      <div className="mt-8 space-y-4">
+      <div className="mt-4 space-y-4"> {/* Reduced mt-8 to mt-4 */}
         {modifiedPromptMessage && (
           <Alert variant="default" className="bg-blue-50 border-blue-200 text-blue-700">
             <AlertCircle className="h-4 w-4 !text-blue-700" />
