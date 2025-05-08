@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ChangeEvent } from 'react'; // Keep for other potential inputs, though not used by sliders directly
@@ -295,9 +296,9 @@ export function ImageGeneratorForm() {
 
   return (
     <div className="w-full mx-auto pt-8 pb-2 flex flex-col flex-grow">
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 flex-grow"> {/* Changed lg:grid-cols-3 to lg:grid-cols-5 */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 flex-grow">
         {/* Left Column: Prompt & Tips */}
-        <div className="space-y-6 lg:col-span-1">
+        <div className="space-y-6 lg:col-span-2">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -329,7 +330,7 @@ export function ImageGeneratorForm() {
         </div>
 
         {/* Middle Column: Generated Image Preview & Actions & Editing Tools */}
-        <div className="space-y-6 lg:col-span-3"> {/* Changed lg:col-span-1 to lg:col-span-3 */}
+        <div className="space-y-6 lg:col-span-2">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Generated Image</CardTitle></CardHeader>
             <CardContent>
@@ -346,7 +347,7 @@ export function ImageGeneratorForm() {
                     alt={prompt || 'Generated AI image'}
                     width={originalImageDimensionsRef.current?.width || 512}
                     height={originalImageDimensionsRef.current?.height || 512}
-                    className="object-contain w-full h-full max-w-full rounded" /* Removed max-h-[512px] */
+                    className="object-contain w-full h-full max-w-full rounded" 
                     data-ai-hint="generated image"
                     priority // Prioritize loading the main image
                   />
@@ -475,7 +476,7 @@ export function ImageGeneratorForm() {
         <div className="lg:col-span-1">
             <Card className="shadow-lg h-full flex flex-col">
                 <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
-                <CardContent className="pt-0 p-2 flex-grow overflow-y-auto">
+                <CardContent className="pt-0 flex-grow overflow-y-auto">
                 {galleryImages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
                 ) : (
