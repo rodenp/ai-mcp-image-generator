@@ -357,7 +357,7 @@ export function ImageGeneratorForm() {
           </Card>
            {/* Editing Tools Section - now part of the middle column */}
           {isEditing && currentDisplayUrl && (
-            <Card className="shadow-lg"> {/* Removed mt-8, space-y-6 of parent div handles spacing */}
+            <Card className="shadow-lg"> 
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Edit Image</CardTitle>
                 <Button onClick={handleResetEdits} variant="outline" size="sm">
@@ -410,14 +410,14 @@ export function ImageGeneratorForm() {
         </div>
 
         {/* Right Column: Gallery Section */}
-        <div className="space-y-6 lg:col-span-1">
-            <Card className="shadow-lg h-full"> {/* Added h-full for consistent height if desired */}
+        <div className="lg:col-span-1">
+            <Card className="shadow-lg h-full">
                 <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
-                <CardContent>
+                <CardContent className="pt-0 p-2">
                 {galleryImages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
                 ) : (
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-2">
                     {galleryImages.map((imgDataUrl, index) => (
                         <div key={index} className="aspect-square bg-muted rounded-md overflow-hidden border hover:shadow-md transition-shadow">
                         <Image 
@@ -427,7 +427,7 @@ export function ImageGeneratorForm() {
                             height={200} 
                             className="object-cover w-full h-full" 
                             data-ai-hint="gallery art"
-                            priority={index < 4} // Prioritize loading first few images in 2-column layout
+                            priority={index < 4} 
                             />
                         </div>
                     ))}
@@ -459,4 +459,3 @@ export function ImageGeneratorForm() {
     </div>
   );
 }
-
