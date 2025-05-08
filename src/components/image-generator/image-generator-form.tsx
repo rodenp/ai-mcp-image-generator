@@ -282,7 +282,7 @@ export function ImageGeneratorForm() {
 
   return (
     <div className="w-full mx-auto py-8">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8"> {/* Removed items-start */}
         {/* Left Column: Prompt & Tips */}
         <div className="space-y-6 lg:col-span-1">
           <Card className="shadow-lg">
@@ -411,9 +411,9 @@ export function ImageGeneratorForm() {
 
         {/* Right Column: Gallery Section */}
         <div className="lg:col-span-1">
-            <Card className="shadow-lg h-full">
+            <Card className="shadow-lg h-full flex flex-col"> {/* Added flex flex-col */}
                 <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
-                <CardContent className="pt-0 p-2">
+                <CardContent className="pt-0 p-2 flex-grow overflow-y-auto"> {/* Added flex-grow overflow-y-auto */}
                 {galleryImages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
                 ) : (
