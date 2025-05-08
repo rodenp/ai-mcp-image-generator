@@ -1,21 +1,22 @@
-
 "use client";
 
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent } from 'react'; // Keep for other potential inputs, though not used by sliders directly
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+// Input is no longer used for resize/crop, but kept for potential future use or other inputs
+// import { Input } from '@/components/ui/input'; 
 import { Label } from '@/components/ui/label';
 import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, Settings2, Crop, Maximize, RotateCcw } from 'lucide-react';
 import { generateImage, type GeneratedImage } from '@/services/image-generation';
 import { modifyPromptIfInappropriate, type ModifyPromptIfInappropriateOutput } from '@/ai/flows/modify-prompt-if-inappropriate';
 import { useToast } from '@/hooks/use-toast';
+import { Slider } from "@/components/ui/slider"; // Import Slider component
 
-const MAX_GALLERY_IMAGES = 20; // Optional: limit gallery size
+const MAX_GALLERY_IMAGES = 20; 
 const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGallery';
 
 export function ImageGeneratorForm() {
@@ -23,26 +24,22 @@ export function ImageGeneratorForm() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   
-  // URLs and Image Data
-  const [generatedImageBlobUrl, setGeneratedImageBlobUrl] = useState<string | null>(null); // Original blob URL from generation
-  const [currentDisplayUrl, setCurrentDisplayUrl] = useState<string | null>(null); // Data URL for current display/editing
+  const [generatedImageBlobUrl, setGeneratedImageBlobUrl] = useState<string | null>(null); 
+  const [currentDisplayUrl, setCurrentDisplayUrl] = useState<string | null>(null); 
 
   const objectUrlRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const originalImageDimensionsRef = useRef<{ width: number; height: number } | null>(null);
   
-  // Editing State
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editDimensions, setEditDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [cropArea, setCropArea] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 0, height: 0 });
 
-  // Gallery State
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
 
   const [modifiedPromptMessage, setModifiedPromptMessage] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // Load gallery from localStorage on mount
   useEffect(() => {
     try {
       const storedGallery = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
@@ -54,7 +51,6 @@ export function ImageGeneratorForm() {
     }
   }, []);
 
-  // Save gallery to localStorage when it changes
   useEffect(() => {
     try {
       localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(galleryImages));
@@ -70,7 +66,6 @@ export function ImageGeneratorForm() {
   
 
   useEffect(() => {
-    // Cleanup blob URL on component unmount
     return () => {
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
@@ -121,7 +116,6 @@ export function ImageGeneratorForm() {
       objectUrlRef.current = blobUrl;
       setGeneratedImageBlobUrl(blobUrl);
 
-      // Convert blob to data URL for canvas operations and display
       const reader = new FileReader();
       reader.onloadend = () => {
         const dataUrl = reader.result as string;
@@ -187,8 +181,8 @@ export function ImageGeneratorForm() {
         ctx.drawImage(img, 0, 0, editDimensions.width, editDimensions.height);
       });
       setCurrentDisplayUrl(newImageUrl);
-      originalImageDimensionsRef.current = { width: editDimensions.width, height: editDimensions.height }; // Update original dimensions to current
-      setCropArea({ x: 0, y: 0, width: editDimensions.width, height: editDimensions.height }); // Reset crop area
+      originalImageDimensionsRef.current = { width: editDimensions.width, height: editDimensions.height }; 
+      setCropArea({ x: 0, y: 0, width: editDimensions.width, height: editDimensions.height }); 
       toast({ title: "Resize Applied", description: `Image resized to ${editDimensions.width}x${editDimensions.height}px.` });
     } catch (e: any) {
       toast({ title: "Resize Error", description: e.message, variant: "destructive" });
@@ -202,6 +196,11 @@ export function ImageGeneratorForm() {
         toast({ title: "Invalid Crop Area", description: "Crop width and height must be positive.", variant: "destructive" });
         return;
     }
+    if (x + width > originalImageDimensionsRef.current.width || y + height > originalImageDimensionsRef.current.height) {
+        toast({ title: "Invalid Crop Area", description: "Crop area extends beyond image boundaries.", variant: "destructive" });
+        return;
+    }
+
 
     try {
       const newImageUrl = await drawImageToCanvas(currentDisplayUrl, (ctx, img) => {
@@ -210,8 +209,8 @@ export function ImageGeneratorForm() {
         ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
       });
       setCurrentDisplayUrl(newImageUrl);
-      originalImageDimensionsRef.current = { width, height }; // Update original dimensions to current
-      setEditDimensions({ width, height }); // Update resize inputs
+      originalImageDimensionsRef.current = { width, height }; 
+      setEditDimensions({ width, height }); 
       toast({ title: "Crop Applied" });
     } catch (e: any) {
       toast({ title: "Crop Error", description: e.message, variant: "destructive" });
@@ -264,25 +263,39 @@ export function ImageGeneratorForm() {
     toast({ title: "Added to Gallery", description: "Image saved to your local gallery." });
   };
 
-  const handleDimensionChange = (e: ChangeEvent<HTMLInputElement>, type: 'width' | 'height') => {
-    const value = parseInt(e.target.value);
-    setEditDimensions(prev => ({ ...prev, [type]: isNaN(value) ? 0 : value }));
+  // Slider change handlers
+  const handleResizeWidthChange = (value: number[]) => {
+    setEditDimensions(prev => ({ ...prev, width: value[0] }));
+  };
+  const handleResizeHeightChange = (value: number[]) => {
+    setEditDimensions(prev => ({ ...prev, height: value[0] }));
+  };
+  const handleCropXChange = (value: number[]) => {
+    setCropArea(prev => ({ ...prev, x: value[0] }));
+  };
+  const handleCropYChange = (value: number[]) => {
+    setCropArea(prev => ({ ...prev, y: value[0] }));
+  };
+  const handleCropWidthChange = (value: number[]) => {
+    setCropArea(prev => ({ ...prev, width: value[0] }));
+  };
+  const handleCropHeightChange = (value: number[]) => {
+    setCropArea(prev => ({ ...prev, height: value[0] }));
   };
 
-  const handleCropChange = (e: ChangeEvent<HTMLInputElement>, type: 'x' | 'y' | 'width' | 'height') => {
-    const value = parseInt(e.target.value);
-    setCropArea(prev => ({ ...prev, [type]: isNaN(value) ? 0 : value }));
-  };
 
   const tips = [
     "Be specific about subject, style, and setting",
     "Try artistic styles like \"oil painting\" or \"digital art\"",
     "Specify lighting: \"golden hour\", \"studio lighting\"",
   ];
+  
+  const currentImageWidth = originalImageDimensionsRef.current?.width || 512;
+  const currentImageHeight = originalImageDimensionsRef.current?.height || 512;
 
   return (
-    <div className="w-full mx-auto pt-8 pb-2 flex flex-col flex-grow"> {/* Reduced pb-8 to pb-2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-grow">
+    <div className="w-full mx-auto pt-8 pb-2 flex flex-col flex-grow">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 flex-grow"> {/* Changed lg:grid-cols-3 to lg:grid-cols-5 */}
         {/* Left Column: Prompt & Tips */}
         <div className="space-y-6 lg:col-span-1">
           <Card className="shadow-lg">
@@ -316,7 +329,7 @@ export function ImageGeneratorForm() {
         </div>
 
         {/* Middle Column: Generated Image Preview & Actions & Editing Tools */}
-        <div className="space-y-6 lg:col-span-1">
+        <div className="space-y-6 lg:col-span-3"> {/* Changed lg:col-span-1 to lg:col-span-3 */}
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Generated Image</CardTitle></CardHeader>
             <CardContent>
@@ -333,8 +346,9 @@ export function ImageGeneratorForm() {
                     alt={prompt || 'Generated AI image'}
                     width={originalImageDimensionsRef.current?.width || 512}
                     height={originalImageDimensionsRef.current?.height || 512}
-                    className="object-contain w-full h-full max-w-full max-h-[512px] rounded"
+                    className="object-contain w-full h-full max-w-full rounded" /* Removed max-h-[512px] */
                     data-ai-hint="generated image"
+                    priority // Prioritize loading the main image
                   />
                 )}
                 {!isLoading && !currentDisplayUrl && (
@@ -355,8 +369,8 @@ export function ImageGeneratorForm() {
               )}
             </CardContent>
           </Card>
-           {/* Editing Tools Section - now part of the middle column */}
-          {isEditing && currentDisplayUrl && (
+          
+          {isEditing && currentDisplayUrl && originalImageDimensionsRef.current && (
             <Card className="shadow-lg"> 
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Edit Image</CardTitle>
@@ -368,40 +382,88 @@ export function ImageGeneratorForm() {
                 {/* Resize Controls */}
                 <div className="space-y-3 p-4 border rounded-md">
                   <h4 className="text-lg font-semibold flex items-center"><Maximize className="mr-2 h-5 w-5 text-primary" />Resize</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-                    <div className="space-y-1">
-                      <Label htmlFor="resizeWidth">Width (px)</Label>
-                      <Input id="resizeWidth" type="number" value={editDimensions.width} onChange={(e) => handleDimensionChange(e, 'width')} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 items-end">
+                    <div className="space-y-2">
+                      <Label htmlFor="resizeWidthSlider" className="text-sm">Width: {editDimensions.width}px</Label>
+                      <Slider
+                        id="resizeWidthSlider"
+                        value={[editDimensions.width]}
+                        onValueChange={handleResizeWidthChange}
+                        min={50}
+                        max={currentImageWidth * 2 > 4096 ? 4096 : (currentImageWidth * 2 || 1024)}
+                        step={1}
+                        aria-label="Resize width"
+                      />
                     </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="resizeHeight">Height (px)</Label>
-                      <Input id="resizeHeight" type="number" value={editDimensions.height} onChange={(e) => handleDimensionChange(e, 'height')} />
+                    <div className="space-y-2">
+                      <Label htmlFor="resizeHeightSlider" className="text-sm">Height: {editDimensions.height}px</Label>
+                       <Slider
+                        id="resizeHeightSlider"
+                        value={[editDimensions.height]}
+                        onValueChange={handleResizeHeightChange}
+                        min={50}
+                        max={currentImageHeight * 2 > 4096 ? 4096 : (currentImageHeight * 2 || 1024)}
+                        step={1}
+                        aria-label="Resize height"
+                      />
                     </div>
-                    <Button onClick={handleApplyResize} className="w-full sm:w-auto">Apply Resize</Button>
+                    <Button onClick={handleApplyResize} className="w-full sm:col-span-2">Apply Resize</Button>
                   </div>
                 </div>
 
                 {/* Crop Controls */}
                 <div className="space-y-3 p-4 border rounded-md">
                   <h4 className="text-lg font-semibold flex items-center"><Crop className="mr-2 h-5 w-5 text-primary"/>Crop</h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-end">
-                    <div className="space-y-1">
-                      <Label htmlFor="cropX">X</Label>
-                      <Input id="cropX" type="number" value={cropArea.x} onChange={(e) => handleCropChange(e, 'x')} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 items-end">
+                    <div className="space-y-2">
+                      <Label htmlFor="cropXSlider" className="text-sm">X: {cropArea.x}px</Label>
+                      <Slider
+                        id="cropXSlider"
+                        value={[cropArea.x]}
+                        onValueChange={handleCropXChange}
+                        min={0}
+                        max={currentImageWidth -1 } // Max X is width - 1 (or width - cropArea.width for stricter bounds)
+                        step={1}
+                        aria-label="Crop X offset"
+                      />
                     </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="cropY">Y</Label>
-                      <Input id="cropY" type="number" value={cropArea.y} onChange={(e) => handleCropChange(e, 'y')} />
+                    <div className="space-y-2">
+                      <Label htmlFor="cropYSlider" className="text-sm">Y: {cropArea.y}px</Label>
+                      <Slider
+                        id="cropYSlider"
+                        value={[cropArea.y]}
+                        onValueChange={handleCropYChange}
+                        min={0}
+                        max={currentImageHeight -1 } // Max Y is height - 1
+                        step={1}
+                        aria-label="Crop Y offset"
+                      />
                     </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="cropWidth">Width</Label>
-                      <Input id="cropWidth" type="number" value={cropArea.width} onChange={(e) => handleCropChange(e, 'width')} />
+                    <div className="space-y-2">
+                      <Label htmlFor="cropWidthSlider" className="text-sm">Width: {cropArea.width}px</Label>
+                      <Slider
+                        id="cropWidthSlider"
+                        value={[cropArea.width]}
+                        onValueChange={handleCropWidthChange}
+                        min={1}
+                        max={currentImageWidth}
+                        step={1}
+                        aria-label="Crop width"
+                      />
                     </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="cropHeight">Height</Label>
-                      <Input id="cropHeight" type="number" value={cropArea.height} onChange={(e) => handleCropChange(e, 'height')} />
+                    <div className="space-y-2">
+                      <Label htmlFor="cropHeightSlider" className="text-sm">Height: {cropArea.height}px</Label>
+                      <Slider
+                        id="cropHeightSlider"
+                        value={[cropArea.height]}
+                        onValueChange={handleCropHeightChange}
+                        min={1}
+                        max={currentImageHeight}
+                        step={1}
+                        aria-label="Crop height"
+                      />
                     </div>
-                    <Button onClick={handleApplyCrop} className="w-full sm:w-auto col-span-2 sm:col-span-1">Apply Crop</Button>
+                    <Button onClick={handleApplyCrop} className="w-full sm:col-span-2">Apply Crop</Button>
                   </div>
                 </div>
               </CardContent>
@@ -411,9 +473,9 @@ export function ImageGeneratorForm() {
 
         {/* Right Column: Gallery Section */}
         <div className="lg:col-span-1">
-            <Card className="shadow-lg h-full flex flex-col"> {/* h-full to take full height of grid cell */}
+            <Card className="shadow-lg h-full flex flex-col">
                 <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
-                <CardContent className="pt-0 p-2 flex-grow overflow-y-auto"> {/* flex-grow and overflow-y-auto */}
+                <CardContent className="pt-0 p-2 flex-grow overflow-y-auto">
                 {galleryImages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
                 ) : (
@@ -438,8 +500,7 @@ export function ImageGeneratorForm() {
         </div>
       </div>
 
-      {/* Alerts - Placed below the main 3-column grid, within the form's padded area */}
-      <div className="mt-4 space-y-4"> {/* Reduced mt-8 to mt-4 */}
+      <div className="mt-4 space-y-4">
         {modifiedPromptMessage && (
           <Alert variant="default" className="bg-blue-50 border-blue-200 text-blue-700">
             <AlertCircle className="h-4 w-4 !text-blue-700" />
@@ -456,7 +517,6 @@ export function ImageGeneratorForm() {
         )}
       </div>
       
-      {/* Hidden canvas for image manipulation */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
     </div>
   );
