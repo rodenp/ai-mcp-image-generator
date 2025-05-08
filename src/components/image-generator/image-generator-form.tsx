@@ -1,21 +1,19 @@
 
 "use client";
 
-import type { ChangeEvent } from 'react'; // Keep for other potential inputs, though not used by sliders directly
+import type { ChangeEvent } from 'react'; 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-// Input is no longer used for resize/crop, but kept for potential future use or other inputs
-// import { Input } from '@/components/ui/input'; 
 import { Label } from '@/components/ui/label';
 import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, Settings2, Crop, Maximize, RotateCcw } from 'lucide-react';
 import { generateImage, type GeneratedImage } from '@/services/image-generation';
 import { modifyPromptIfInappropriate, type ModifyPromptIfInappropriateOutput } from '@/ai/flows/modify-prompt-if-inappropriate';
 import { useToast } from '@/hooks/use-toast';
-import { Slider } from "@/components/ui/slider"; // Import Slider component
+import { Slider } from "@/components/ui/slider"; 
 
 const MAX_GALLERY_IMAGES = 20; 
 const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGallery';
@@ -264,7 +262,6 @@ export function ImageGeneratorForm() {
     toast({ title: "Added to Gallery", description: "Image saved to your local gallery." });
   };
 
-  // Slider change handlers
   const handleResizeWidthChange = (value: number[]) => {
     setEditDimensions(prev => ({ ...prev, width: value[0] }));
   };
@@ -295,7 +292,7 @@ export function ImageGeneratorForm() {
   const currentImageHeight = originalImageDimensionsRef.current?.height || 512;
 
   return (
-    <div className="w-full pt-8 pb-2 flex flex-col flex-grow pl-4 pr-2 sm:pl-6 sm:pr-3 lg:pl-8 lg:pr-4">
+    <div className="w-full pt-8 pb-12 flex flex-col flex-grow"> {/* Removed specific horizontal padding, increased pb */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 flex-grow">
         {/* Left Column: Prompt & Tips */}
         <div className="space-y-6 lg:col-span-2">
@@ -349,7 +346,7 @@ export function ImageGeneratorForm() {
                     height={originalImageDimensionsRef.current?.height || 512}
                     className="object-contain w-full h-full max-w-full rounded" 
                     data-ai-hint="generated image"
-                    priority // Prioritize loading the main image
+                    priority 
                   />
                 )}
                 {!isLoading && !currentDisplayUrl && (
@@ -380,7 +377,6 @@ export function ImageGeneratorForm() {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Resize Controls */}
                 <div className="space-y-3 p-4 border rounded-md">
                   <h4 className="text-lg font-semibold flex items-center"><Maximize className="mr-2 h-5 w-5 text-primary" />Resize</h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 items-end">
@@ -412,7 +408,6 @@ export function ImageGeneratorForm() {
                   </div>
                 </div>
 
-                {/* Crop Controls */}
                 <div className="space-y-3 p-4 border rounded-md">
                   <h4 className="text-lg font-semibold flex items-center"><Crop className="mr-2 h-5 w-5 text-primary"/>Crop</h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 items-end">
@@ -423,7 +418,7 @@ export function ImageGeneratorForm() {
                         value={[cropArea.x]}
                         onValueChange={handleCropXChange}
                         min={0}
-                        max={currentImageWidth -1 } // Max X is width - 1 (or width - cropArea.width for stricter bounds)
+                        max={currentImageWidth -1 } 
                         step={1}
                         aria-label="Crop X offset"
                       />
@@ -435,7 +430,7 @@ export function ImageGeneratorForm() {
                         value={[cropArea.y]}
                         onValueChange={handleCropYChange}
                         min={0}
-                        max={currentImageHeight -1 } // Max Y is height - 1
+                        max={currentImageHeight -1 } 
                         step={1}
                         aria-label="Crop Y offset"
                       />
@@ -474,23 +469,26 @@ export function ImageGeneratorForm() {
 
         {/* Right Column: Gallery Section */}
         <div className="lg:col-span-1">
-            <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-12rem-4rem)]"> {/* Adjusted max-h to be relative to viewport height minus header/footer/margins approx */}
+            <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-12rem-4rem)]"> 
                 <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
                 <CardContent className="pt-0 flex-grow overflow-y-auto">
                 {galleryImages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
                 ) : (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 gap-4"> {/* Changed to grid-cols-1 and gap-4 */}
                     {galleryImages.map((imgDataUrl, index) => (
-                        <div key={index} className="aspect-square bg-muted rounded-md overflow-hidden border hover:shadow-md transition-shadow">
-                        <Image 
-                            src={imgDataUrl} 
-                            alt={`Gallery image ${index + 1}`} 
-                            width={200} 
-                            height={200} 
-                            className="object-cover w-full h-full" 
-                            data-ai-hint="gallery art"
-                            priority={index < 4} 
+                        <div 
+                            key={index} 
+                            className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200"
+                        > {/* Added relative, updated border, shadow, hover, focus */}
+                          <Image 
+                              src={imgDataUrl} 
+                              alt={`Gallery image ${index + 1}`} 
+                              fill // Use fill for responsiveness
+                              sizes="(max-width: 1023px) 90vw, 20vw" // Adjusted sizes prop
+                              className="object-cover" // Ensure image covers the area
+                              data-ai-hint="gallery art"
+                              priority={index < 2} // Prioritize loading first 2 images in gallery
                             />
                         </div>
                     ))}
@@ -522,4 +520,3 @@ export function ImageGeneratorForm() {
     </div>
   );
 }
-
