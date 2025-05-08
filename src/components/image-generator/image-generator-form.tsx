@@ -281,8 +281,8 @@ export function ImageGeneratorForm() {
   ];
 
   return (
-    <div className="w-full mx-auto py-8">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8"> {/* Removed items-start */}
+    <div className="w-full mx-auto py-8 flex flex-col flex-grow"> {/* Added flex flex-col flex-grow */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-grow"> {/* Added flex-grow */}
         {/* Left Column: Prompt & Tips */}
         <div className="space-y-6 lg:col-span-1">
           <Card className="shadow-lg">
@@ -411,9 +411,9 @@ export function ImageGeneratorForm() {
 
         {/* Right Column: Gallery Section */}
         <div className="lg:col-span-1">
-            <Card className="shadow-lg h-full flex flex-col"> {/* Added flex flex-col */}
+            <Card className="shadow-lg h-full flex flex-col"> {/* h-full to take full height of grid cell */}
                 <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
-                <CardContent className="pt-0 p-2 flex-grow overflow-y-auto"> {/* Added flex-grow overflow-y-auto */}
+                <CardContent className="pt-0 p-2 flex-grow overflow-y-auto"> {/* flex-grow and overflow-y-auto */}
                 {galleryImages.length === 0 ? (
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
                 ) : (
@@ -438,21 +438,23 @@ export function ImageGeneratorForm() {
         </div>
       </div>
 
-      {/* Alerts - Placed below the main 3-column grid */}
-      {modifiedPromptMessage && (
-        <Alert variant="default" className="mt-8 bg-blue-50 border-blue-200 text-blue-700">
-           <AlertCircle className="h-4 w-4 !text-blue-700" />
-          <AlertTitle>Prompt Moderated</AlertTitle>
-          <AlertDescription>{modifiedPromptMessage}</AlertDescription>
-        </Alert>
-      )}
-      {error && (
-        <Alert variant="destructive" className="mt-8">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {/* Alerts - Placed below the main 3-column grid, within the form's padded area */}
+      <div className="mt-8 space-y-4">
+        {modifiedPromptMessage && (
+          <Alert variant="default" className="bg-blue-50 border-blue-200 text-blue-700">
+            <AlertCircle className="h-4 w-4 !text-blue-700" />
+            <AlertTitle>Prompt Moderated</AlertTitle>
+            <AlertDescription>{modifiedPromptMessage}</AlertDescription>
+          </Alert>
+        )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+      </div>
       
       {/* Hidden canvas for image manipulation */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
