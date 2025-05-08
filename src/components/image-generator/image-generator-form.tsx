@@ -295,7 +295,7 @@ export function ImageGeneratorForm() {
   const currentImageHeight = originalImageDimensionsRef.current?.height || 512;
 
   return (
-    <div className="w-full mx-auto pt-8 pb-2 flex flex-col flex-grow">
+    <div className="w-full pt-8 pb-2 flex flex-col flex-grow pl-4 pr-2 sm:pl-6 sm:pr-3 lg:pl-8 lg:pr-4">
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 flex-grow">
         {/* Left Column: Prompt & Tips */}
         <div className="space-y-6 lg:col-span-2">
@@ -474,7 +474,7 @@ export function ImageGeneratorForm() {
 
         {/* Right Column: Gallery Section */}
         <div className="lg:col-span-1">
-            <Card className="shadow-lg h-full flex flex-col">
+            <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-12rem-4rem)]"> {/* Adjusted max-h to be relative to viewport height minus header/footer/margins approx */}
                 <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
                 <CardContent className="pt-0 flex-grow overflow-y-auto">
                 {galleryImages.length === 0 ? (
@@ -522,3 +522,4 @@ export function ImageGeneratorForm() {
     </div>
   );
 }
+
