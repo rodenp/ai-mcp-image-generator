@@ -10,7 +10,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, Settings2, Crop,Minimize,Maximize, RotateCcw } from 'lucide-react';
+import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, Settings2, Crop, Maximize, RotateCcw } from 'lucide-react';
 import { generateImage, type GeneratedImage } from '@/services/image-generation';
 import { modifyPromptIfInappropriate, type ModifyPromptIfInappropriateOutput } from '@/ai/flows/modify-prompt-if-inappropriate';
 import { useToast } from '@/hooks/use-toast';
@@ -132,15 +132,6 @@ export function ImageGeneratorForm() {
           originalImageDimensionsRef.current = { width: img.width, height: img.height };
           setEditDimensions({ width: img.width, height: img.height });
           setCropArea({ x: 0, y: 0, width: img.width, height: img.height });
-          
-          // Optionally draw to hidden canvas if needed immediately, though not strictly necessary with this flow
-          // const canvas = canvasRef.current;
-          // if (canvas) {
-          //   canvas.width = img.width;
-          //   canvas.height = img.height;
-          //   const ctx = canvas.getContext('2d');
-          //   ctx?.drawImage(img, 0, 0);
-          // }
         };
         img.src = dataUrl;
       };
@@ -241,8 +232,6 @@ export function ImageGeneratorForm() {
             };
             img.src = dataUrl;
         };
-        // Need to fetch the blob again if generatedImageBlobUrl is just a URL
-        // This assumes generatedImageBlobUrl is a direct blob object URL
         fetch(generatedImageBlobUrl)
             .then(res => res.blob())
             .then(blob => reader.readAsDataURL(blob))
@@ -253,7 +242,6 @@ export function ImageGeneratorForm() {
          toast({ title: "Edits Reset", description: "Image restored to original generated version." });
     }
   };
-
 
   const handleSaveToDisk = () => {
     if (!currentDisplayUrl) return;
@@ -293,10 +281,10 @@ export function ImageGeneratorForm() {
   ];
 
   return (
-    <div className="w-full max-w-5xl mx-auto py-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+    <div className="w-full mx-auto py-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         {/* Left Column: Prompt & Tips */}
-        <div className="space-y-6">
+        <div className="space-y-6 lg:col-span-1">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -327,8 +315,8 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Right Column: Generated Image Preview & Actions */}
-        <div className="space-y-6">
+        {/* Middle Column: Generated Image Preview & Actions & Editing Tools */}
+        <div className="space-y-6 lg:col-span-1">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Generated Image</CardTitle></CardHeader>
             <CardContent>
@@ -367,63 +355,90 @@ export function ImageGeneratorForm() {
               )}
             </CardContent>
           </Card>
+           {/* Editing Tools Section - now part of the middle column */}
+          {isEditing && currentDisplayUrl && (
+            <Card className="shadow-lg"> {/* Removed mt-8, space-y-6 of parent div handles spacing */}
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Edit Image</CardTitle>
+                <Button onClick={handleResetEdits} variant="outline" size="sm">
+                    <RotateCcw className="mr-2 h-4 w-4" /> Reset Edits
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Resize Controls */}
+                <div className="space-y-3 p-4 border rounded-md">
+                  <h4 className="text-lg font-semibold flex items-center"><Maximize className="mr-2 h-5 w-5 text-primary" />Resize</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                    <div className="space-y-1">
+                      <Label htmlFor="resizeWidth">Width (px)</Label>
+                      <Input id="resizeWidth" type="number" value={editDimensions.width} onChange={(e) => handleDimensionChange(e, 'width')} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="resizeHeight">Height (px)</Label>
+                      <Input id="resizeHeight" type="number" value={editDimensions.height} onChange={(e) => handleDimensionChange(e, 'height')} />
+                    </div>
+                    <Button onClick={handleApplyResize} className="w-full sm:w-auto">Apply Resize</Button>
+                  </div>
+                </div>
+
+                {/* Crop Controls */}
+                <div className="space-y-3 p-4 border rounded-md">
+                  <h4 className="text-lg font-semibold flex items-center"><Crop className="mr-2 h-5 w-5 text-primary"/>Crop</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-end">
+                    <div className="space-y-1">
+                      <Label htmlFor="cropX">X</Label>
+                      <Input id="cropX" type="number" value={cropArea.x} onChange={(e) => handleCropChange(e, 'x')} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="cropY">Y</Label>
+                      <Input id="cropY" type="number" value={cropArea.y} onChange={(e) => handleCropChange(e, 'y')} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="cropWidth">Width</Label>
+                      <Input id="cropWidth" type="number" value={cropArea.width} onChange={(e) => handleCropChange(e, 'width')} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="cropHeight">Height</Label>
+                      <Input id="cropHeight" type="number" value={cropArea.height} onChange={(e) => handleCropChange(e, 'height')} />
+                    </div>
+                    <Button onClick={handleApplyCrop} className="w-full sm:w-auto col-span-2 sm:col-span-1">Apply Crop</Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Right Column: Gallery Section */}
+        <div className="space-y-6 lg:col-span-1">
+            <Card className="shadow-lg h-full"> {/* Added h-full for consistent height if desired */}
+                <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
+                <CardContent>
+                {galleryImages.length === 0 ? (
+                    <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
+                ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                    {galleryImages.map((imgDataUrl, index) => (
+                        <div key={index} className="aspect-square bg-muted rounded-md overflow-hidden border hover:shadow-md transition-shadow">
+                        <Image 
+                            src={imgDataUrl} 
+                            alt={`Gallery image ${index + 1}`} 
+                            width={200} 
+                            height={200} 
+                            className="object-cover w-full h-full" 
+                            data-ai-hint="gallery art"
+                            priority={index < 4} // Prioritize loading first few images in 2-column layout
+                            />
+                        </div>
+                    ))}
+                    </div>
+                )}
+                </CardContent>
+            </Card>
         </div>
       </div>
 
-      {/* Editing Tools Section */}
-      {isEditing && currentDisplayUrl && (
-        <Card className="mt-8 shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Edit Image</CardTitle>
-            <Button onClick={handleResetEdits} variant="outline" size="sm">
-                <RotateCcw className="mr-2 h-4 w-4" /> Reset Edits
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Resize Controls */}
-            <div className="space-y-3 p-4 border rounded-md">
-              <h4 className="text-lg font-semibold flex items-center"><Maximize className="mr-2 h-5 w-5 text-primary" />Resize</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-                <div className="space-y-1">
-                  <Label htmlFor="resizeWidth">Width (px)</Label>
-                  <Input id="resizeWidth" type="number" value={editDimensions.width} onChange={(e) => handleDimensionChange(e, 'width')} />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="resizeHeight">Height (px)</Label>
-                  <Input id="resizeHeight" type="number" value={editDimensions.height} onChange={(e) => handleDimensionChange(e, 'height')} />
-                </div>
-                <Button onClick={handleApplyResize} className="w-full sm:w-auto">Apply Resize</Button>
-              </div>
-            </div>
-
-            {/* Crop Controls */}
-            <div className="space-y-3 p-4 border rounded-md">
-              <h4 className="text-lg font-semibold flex items-center"><Crop className="mr-2 h-5 w-5 text-primary"/>Crop</h4>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-end">
-                <div className="space-y-1">
-                  <Label htmlFor="cropX">X</Label>
-                  <Input id="cropX" type="number" value={cropArea.x} onChange={(e) => handleCropChange(e, 'x')} />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cropY">Y</Label>
-                  <Input id="cropY" type="number" value={cropArea.y} onChange={(e) => handleCropChange(e, 'y')} />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cropWidth">Width</Label>
-                  <Input id="cropWidth" type="number" value={cropArea.width} onChange={(e) => handleCropChange(e, 'width')} />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cropHeight">Height</Label>
-                  <Input id="cropHeight" type="number" value={cropArea.height} onChange={(e) => handleCropChange(e, 'height')} />
-                </div>
-                <Button onClick={handleApplyCrop} className="w-full sm:w-auto col-span-2 sm:col-span-1">Apply Crop</Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Alerts */}
+      {/* Alerts - Placed below the main 3-column grid */}
       {modifiedPromptMessage && (
         <Alert variant="default" className="mt-8 bg-blue-50 border-blue-200 text-blue-700">
            <AlertCircle className="h-4 w-4 !text-blue-700" />
@@ -439,32 +454,6 @@ export function ImageGeneratorForm() {
         </Alert>
       )}
       
-      {/* Gallery Section */}
-      <Card className="mt-8 shadow-lg">
-        <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
-        <CardContent>
-          {galleryImages.length === 0 ? (
-            <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              {galleryImages.map((imgDataUrl, index) => (
-                <div key={index} className="aspect-square bg-muted rounded-md overflow-hidden border hover:shadow-md transition-shadow">
-                  <Image 
-                    src={imgDataUrl} 
-                    alt={`Gallery image ${index + 1}`} 
-                    width={200} // Placeholder, actual size controlled by CSS
-                    height={200} // Placeholder
-                    className="object-cover w-full h-full" 
-                    data-ai-hint="gallery art"
-                    priority={index < 5} // Prioritize loading first few images
-                    />
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* Hidden canvas for image manipulation */}
       <canvas ref={canvasRef} style={{ display: 'none' }} />
     </div>
