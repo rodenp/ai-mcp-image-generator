@@ -20,6 +20,7 @@ import type { GalleryImage, NewGalleryImage } from '@/lib/db/types';
 
 const MAX_GALLERY_IMAGES = 20; 
 const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls'; // For non-DB fallback
+const BACKEND_UPLOAD_URL = 'http://localhost:9003/upload-image'; // New backend URL
 
 // Helper function to convert data URL to File object
 async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
@@ -237,7 +238,7 @@ export function ImageGeneratorForm() {
         resolve(canvas.toDataURL('image/png'));
       };
       img.onerror = () => reject(new Error("Failed to load image for canvas operation"));
-      img.crossOrigin = "anonymous"; // Important if sourceUrl is from another origin (like Firebase Storage)
+      img.crossOrigin = "anonymous"; 
       img.src = sourceUrl;
     });
   }, [originalImageDimensions]);
@@ -255,7 +256,7 @@ export function ImageGeneratorForm() {
         ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, newWidth, newHeight);
         return { canvasWidth: newWidth, canvasHeight: newHeight };
       });
-      setCurrentDisplayUrl(newImageUrl); // This is now a dataURL of the resized image
+      setCurrentDisplayUrl(newImageUrl); 
       setOriginalImageDimensions({ width: newWidth, height: newHeight }); 
       if (previewContainerRef.current) {
         const containerWidth = previewContainerRef.current.offsetWidth;
@@ -302,7 +303,7 @@ export function ImageGeneratorForm() {
         ctx.drawImage(img, naturalCropX, naturalCropY, naturalCropWidth, naturalCropHeight, 0, 0, naturalCropWidth, naturalCropHeight);
         return { canvasWidth: naturalCropWidth, canvasHeight: naturalCropHeight };
       });
-      setCurrentDisplayUrl(newImageUrl); // This is now a dataURL of the cropped image
+      setCurrentDisplayUrl(newImageUrl); 
       setOriginalImageDimensions({ width: naturalCropWidth, height: naturalCropHeight }); 
        if (previewContainerRef.current) {
             const containerWidth = previewContainerRef.current.offsetWidth;
@@ -327,8 +328,8 @@ export function ImageGeneratorForm() {
   };
   
   const handleResetEdits = () => {
-    if (generatedImageBlobUrl) { // This is the original generated image blob URL
-        setCurrentDisplayUrl(generatedImageBlobUrl); // Reset display to original blob URL
+    if (generatedImageBlobUrl) { 
+        setCurrentDisplayUrl(generatedImageBlobUrl); 
         const img = new window.Image();
         img.onload = () => {
             if (img.naturalWidth && img.naturalHeight) { 
@@ -358,14 +359,13 @@ export function ImageGeneratorForm() {
         img.onerror = () => {
               toast({title: "Error Resetting", description: "Failed to load original image for reset.", variant: "destructive"});
         }
-        img.src = generatedImageBlobUrl; // Use the blob URL
+        img.src = generatedImageBlobUrl; 
         toast({ title: "Edits Reset", description: "Image restored to original generated version." });
     }
   };
 
   const handleSaveToDisk = () => {
     if (!currentDisplayUrl) return;
-    // currentDisplayUrl could be an object URL or a data URL. Both work for download.
     const link = document.createElement('a');
     link.href = currentDisplayUrl;
     link.download = `${prompt.substring(0, 20).replace(/\s+/g, '_') || 'ai-image'}.png`;
@@ -375,10 +375,9 @@ export function ImageGeneratorForm() {
     toast({ title: "Image Saved", description: "Image downloaded successfully." });
   };
 
-  // New function to upload image file/blob to backend
   const uploadImageToBackend = async (imageSource: File | Blob | string, fileName: string): Promise<string | null> => {
     let imageFile: File;
-    if (typeof imageSource === 'string') { // If it's a data URL
+    if (typeof imageSource === 'string') { 
         imageFile = await dataUrlToFile(imageSource, fileName);
     } else if (imageSource instanceof Blob && !(imageSource instanceof File)) {
         imageFile = new File([imageSource], fileName, { type: imageSource.type });
@@ -390,7 +389,7 @@ export function ImageGeneratorForm() {
     formData.append('image', imageFile);
 
     try {
-      const response = await fetch('/api/upload-image', {
+      const response = await fetch(BACKEND_UPLOAD_URL, { // Use new backend URL
         method: 'POST',
         body: formData,
       });
@@ -409,7 +408,7 @@ export function ImageGeneratorForm() {
 
 
   const handleAddToGallery = async () => {
-    if (!currentDisplayUrl) return; // currentDisplayUrl is the (possibly edited) image for display
+    if (!currentDisplayUrl) return; 
     if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES) {
         toast({ title: "Gallery Full", description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`, variant: "destructive"});
         return;
@@ -419,15 +418,14 @@ export function ImageGeneratorForm() {
         return;
     }
     
-    setIsLoading(true); // Indicate activity for upload + DB save
+    setIsLoading(true); 
 
     if (isDbConfigured) {
-      // Upload to Firebase Storage first
       const storageUrl = await uploadImageToBackend(currentDisplayUrl, `${prompt.substring(0,20) || 'gallery_image'}.png`);
-      setIsLoading(false); // Stop loading after upload attempt
+      setIsLoading(false); 
 
       if (storageUrl) {
-        const newImageEntry: NewGalleryImage = { dataUrl: storageUrl, prompt }; // dataUrl is now storageUrl
+        const newImageEntry: NewGalleryImage = { dataUrl: storageUrl, prompt }; 
         try {
           const savedImage = await saveImageToDb(newImageEntry);
           if (savedImage) {
@@ -443,13 +441,12 @@ export function ImageGeneratorForm() {
       } else {
          toast({ title: "Storage Error", description: "Could not upload image to cloud storage.", variant: "destructive" });
       }
-    } else { // DB is not configured, save to localStorage (still as dataURL)
+    } else { 
       setIsLoading(false);
       console.log("Database not configured, saving image dataURL to localStorage.");
       try {
-        // currentDisplayUrl is likely a dataURL here or an object URL if reset. If object URL, convert to dataURL first.
         let dataUrlToStore = currentDisplayUrl;
-        if (currentDisplayUrl.startsWith('blob:')) { // It's an object URL, need to convert
+        if (currentDisplayUrl.startsWith('blob:')) { 
             const response = await fetch(currentDisplayUrl);
             const blob = await response.blob();
             dataUrlToStore = await new Promise((resolve, reject) => {
@@ -466,7 +463,7 @@ export function ImageGeneratorForm() {
         
         const localGalleryImage: GalleryImage = {
             id: `local-gen-${Date.now()}`,
-            dataUrl: dataUrlToStore, // Store the actual data URL for localStorage
+            dataUrl: dataUrlToStore, 
             prompt,
             createdAt: new Date(),
         };
@@ -503,7 +500,7 @@ export function ImageGeneratorForm() {
         return;
     }
     
-    setIsLoading(true); // For upload process
+    setIsLoading(true); 
 
     if (isDbConfigured) {
       const storageUrl = await uploadImageToBackend(file, file.name);
@@ -525,7 +522,7 @@ export function ImageGeneratorForm() {
       } else {
          toast({ title: "Storage Error", description: `Could not upload ${file.name} to cloud storage.`, variant: "destructive" });
       }
-    } else { // DB not configured, save to localStorage
+    } else { 
       setIsLoading(false);
       console.log("Database not configured, saving uploaded image dataURL to localStorage.");
       const reader = new FileReader();
@@ -912,9 +909,6 @@ export function ImageGeneratorForm() {
                             key={imgEntry.id} 
                             className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200 cursor-pointer"
                             onClick={() => {
-                                // When clicking a gallery image, display it.
-                                // If it's a storage URL, it will be used directly.
-                                // If it's a local dataURL (from localStorage fallback), it's also used directly.
                                 setCurrentDisplayUrl(imgEntry.dataUrl);
                                 const img = new window.Image();
                                 img.onload = () => {
@@ -936,10 +930,10 @@ export function ImageGeneratorForm() {
                                     setIsCropping(false); setCropArea(null); 
                                     setIsResizing(false); setResizeHandle(null);
                                     setPrompt(imgEntry.prompt || ''); 
-                                    setGeneratedImageBlobUrl(null); // Clear original generated blob if loading from gallery
+                                    setGeneratedImageBlobUrl(null); 
                                 }
                                 img.onerror = () => toast({title: "Gallery Load Error", description: "Could not load selected image.", variant:"destructive"});
-                                img.crossOrigin = "anonymous"; // For images from Firebase Storage
+                                img.crossOrigin = "anonymous"; 
                                 img.src = imgEntry.dataUrl;
                             }}
                         >
