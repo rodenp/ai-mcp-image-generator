@@ -17,12 +17,9 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**',
       },
-      {
-        protocol: 'https',
-        hostname: 'firebasestorage.googleapis.com', // Added Firebase Storage
-        port: '',
-        pathname: '/**',
-      }
+      // Removed Firebase Storage remote pattern
+      // If your custom backend is on a different domain, add its pattern here.
+      // For images served from the local 'public' directory, no specific pattern is needed for basic functionality.
     ],
   },
 };

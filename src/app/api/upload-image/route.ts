@@ -1,10 +1,10 @@
 
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import admin from '@/lib/firebase/firebaseAdmin'; // Ensures admin is initialized
 import { formidable, errors as FormidableErrors } from 'formidable';
 import type { File } from 'formidable';
-import fs from 'fs'; // Required for reading the temporary file path
+import fs from 'fs';
+import path from 'path';
 
 export const config = {
   api: {
@@ -12,17 +12,24 @@ export const config = {
   },
 };
 
+// Ensure the upload directory exists
+const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'images');
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
 async function parseFormData(req: NextRequest): Promise<{ fields: formidable.Fields; files: formidable.Files }> {
-  const formidableReq = req as any; // Cast to any to satisfy formidable's expected request type
+  const formidableReq = req as any; 
   return new Promise((resolve, reject) => {
-    const form = formidable({ 
-        maxFileSize: 10 * 1024 * 1024, // 10MB limit
-        keepExtensions: true,
+    const form = formidable({
+      maxFileSize: 10 * 1024 * 1024, // 10MB limit
+      keepExtensions: true,
+      uploadDir: UPLOAD_DIR, // Temporarily save to final dir, then rename for uniqueness
     });
     form.parse(formidableReq, (err, fields, files) => {
       if (err) {
         if (err.code === FormidableErrors.biggerThanTotalMaxFileSize || err.code === FormidableErrors.biggerThanMaxFileSize) {
-            return reject(new Error('File size exceeds the 10MB limit.'));
+          return reject(new Error('File size exceeds the 10MB limit.'));
         }
         return reject(err);
       }
@@ -33,12 +40,6 @@ async function parseFormData(req: NextRequest): Promise<{ fields: formidable.Fie
 
 export async function POST(req: NextRequest) {
   try {
-    if (!admin.apps.length) {
-      // This is a fallback, should ideally be initialized globally as in firebaseAdmin.ts
-      console.warn("Firebase Admin SDK not initialized in API route, attempting init.");
-      // Potentially re-run init logic here or ensure firebaseAdmin.ts is always imported top-level
-    }
-    
     const { files } = await parseFormData(req);
     
     const imageFile = files.image?.[0] as File | undefined;
@@ -47,26 +48,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No image file provided.' }, { status: 400 });
     }
 
-    const bucket = admin.storage().bucket();
-    const fileName = `images/${Date.now()}_${imageFile.originalFilename || 'uploaded_image'}`;
+    // Generate a unique filename
+    const uniqueSuffix = `${Date.now()}_${Math.round(Math.random() * 1E9)}`;
+    const originalFileName = imageFile.originalFilename || 'uploaded_image';
+    const fileExtension = path.extname(originalFileName);
+    const baseName = path.basename(originalFileName, fileExtension);
+    const uniqueFileName = `${baseName}_${uniqueSuffix}${fileExtension}`;
     
-    // formidable saves files to a temporary path. We need to use this path for uploading.
-    const filePath = imageFile.filepath; 
+    const oldPath = imageFile.filepath; // Path where formidable saved the file
+    const newPath = path.join(UPLOAD_DIR, uniqueFileName);
 
-    await bucket.upload(filePath, {
-      destination: fileName,
-      metadata: {
-        contentType: imageFile.mimetype || 'application/octet-stream',
-      },
-    });
+    // Rename the file to its final unique name
+    fs.renameSync(oldPath, newPath);
 
-    // Make the file public (alternatively, generate a signed URL)
-    const file = bucket.file(fileName);
-    await file.makePublic();
-    const publicUrl = file.publicUrl();
-
-    // Optionally, clean up the temporary file if formidable doesn't do it automatically
-    // fs.unlinkSync(filePath); // Check formidable docs for cleanup behavior
+    // Construct the public URL
+    const publicUrl = `/uploads/images/${uniqueFileName}`;
 
     return NextResponse.json({ storageUrl: publicUrl });
 
@@ -74,11 +70,7 @@ export async function POST(req: NextRequest) {
     console.error('Error uploading image:', error);
     let errorMessage = 'Failed to upload image.';
     if (error.message.includes('File size exceeds')) {
-        errorMessage = error.message;
-    } else if (error.code === 'storage/object-not-found' && error.message.includes("does not have storage.objects.create access")) {
-        errorMessage = "Permission denied. Check Firebase Storage rules and service account permissions.";
-    } else if (error.message.includes('Firebase Admin SDK credentials not found') || error.message.includes('Must initialize App')) {
-        errorMessage = "Firebase Admin SDK not configured correctly. Check server logs and environment variables.";
+      errorMessage = error.message;
     }
     
     return NextResponse.json({ error: errorMessage, details: error.message }, { status: 500 });
