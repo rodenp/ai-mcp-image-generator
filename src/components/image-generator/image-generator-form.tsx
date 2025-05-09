@@ -564,8 +564,8 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Middle Column: Generated Image Preview & Actions - Adjusted to col-span-4 */}
-        <div className="space-y-6 lg:col-span-4 flex flex-col"> 
+        {/* Middle Column: Generated Image Preview & Actions - Adjusted to col-span-5 */}
+        <div className="space-y-6 lg:col-span-5 flex flex-col"> 
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
@@ -700,8 +700,8 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Right Column: Gallery Section - Adjusted to col-span-4 */}
-        <div className="lg:col-span-4"> 
+        {/* Right Column: Gallery Section - Adjusted to col-span-3 */}
+        <div className="lg:col-span-3"> 
              <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> {/* Adjusted max-h */}
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
