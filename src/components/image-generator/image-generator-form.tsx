@@ -8,12 +8,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
-import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, Settings2, Crop, Maximize, RotateCcw } from 'lucide-react';
+import { Label } from '@/components/ui/label'; // Kept for potential future use with a new library
+import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, RotateCcw, UploadCloud, Edit3, Crop, Maximize } from 'lucide-react'; 
 import { generateImage, type GeneratedImage } from '@/services/image-generation';
 import { modifyPromptIfInappropriate, type ModifyPromptIfInappropriateOutput } from '@/ai/flows/modify-prompt-if-inappropriate';
 import { useToast } from '@/hooks/use-toast';
-import { Slider } from "@/components/ui/slider"; 
+import { Slider } from '@/components/ui/slider';
+import { Input } from '@/components/ui/input';
+
 
 const MAX_GALLERY_IMAGES = 20; 
 const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGallery';
@@ -28,16 +30,22 @@ export function ImageGeneratorForm() {
 
   const objectUrlRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const originalImageDimensionsRef = useRef<{ width: number; height: number } | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+
+  const [originalImageDimensions, setOriginalImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [displayDimensions, setDisplayDimensions] = useState<{ width: number; height: number }>({ width: 512, height: 512});
   
-  const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [editDimensions, setEditDimensions] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
-  const [cropArea, setCropArea] = useState<{ x: number; y: number; width: number; height: number }>({ x: 0, y: 0, width: 0, height: 0 });
+  const [isCropping, setIsCropping] = useState(false);
+  const [cropArea, setCropArea] = useState<{ x: number; y: number; width: number; height: number; displayX: number; displayY: number; displayWidth: number; displayHeight: number } | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeHandle, setResizeHandle] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
 
   const [modifiedPromptMessage, setModifiedPromptMessage] = useState<string | null>(null);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try {
@@ -80,8 +88,12 @@ export function ImageGeneratorForm() {
     }
     setGeneratedImageBlobUrl(null);
     setCurrentDisplayUrl(null);
-    setIsEditing(false);
-    originalImageDimensionsRef.current = null;
+    setOriginalImageDimensions(null);
+    setDisplayDimensions({ width: 512, height: 512});
+    setIsCropping(false);
+    setCropArea(null);
+    setIsResizing(false);
+    setResizeHandle(null);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -122,9 +134,22 @@ export function ImageGeneratorForm() {
         
         const img = new window.Image();
         img.onload = () => {
-          originalImageDimensionsRef.current = { width: img.width, height: img.height };
-          setEditDimensions({ width: img.width, height: img.height });
-          setCropArea({ x: 0, y: 0, width: img.width, height: img.height });
+          setOriginalImageDimensions({ width: img.width, height: img.height });
+          // Fit image within preview container while maintaining aspect ratio
+          if (previewContainerRef.current) {
+            const containerWidth = previewContainerRef.current.offsetWidth;
+            const containerHeight = previewContainerRef.current.offsetHeight;
+            const aspectRatio = img.width / img.height;
+            let newWidth = containerWidth;
+            let newHeight = newWidth / aspectRatio;
+            if (newHeight > containerHeight) {
+                newHeight = containerHeight;
+                newWidth = newHeight * aspectRatio;
+            }
+            setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+          } else {
+            setDisplayDimensions({ width: img.width, height: img.height });
+          }
         };
         img.src = dataUrl;
       };
@@ -143,11 +168,11 @@ export function ImageGeneratorForm() {
     }
   };
 
-  const drawImageToCanvas = useCallback((sourceUrl: string, operation: (ctx: CanvasRenderingContext2D, img: HTMLImageElement) => void) => {
+  const drawImageToCanvas = useCallback((sourceUrl: string, operation: (ctx: CanvasRenderingContext2D, img: HTMLImageElement, originalDims: {width:number, height:number}) => {canvasWidth: number, canvasHeight: number}) => {
     return new Promise<string>((resolve, reject) => {
       const canvas = canvasRef.current;
-      if (!canvas) {
-        reject(new Error("Canvas not available"));
+      if (!canvas || !originalImageDimensions) {
+        reject(new Error("Canvas or original dimensions not available"));
         return;
       }
       const ctx = canvas.getContext('2d');
@@ -158,58 +183,96 @@ export function ImageGeneratorForm() {
 
       const img = new window.Image();
       img.onload = () => {
-        operation(ctx, img);
+        const {canvasWidth, canvasHeight} = operation(ctx, img, originalImageDimensions);
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        // Re-run operation with correct canvas dimensions
+        operation(ctx, img, originalImageDimensions); 
         resolve(canvas.toDataURL('image/png'));
       };
       img.onerror = () => reject(new Error("Failed to load image for canvas operation"));
       img.src = sourceUrl;
     });
-  }, []);
+  }, [originalImageDimensions]);
 
-  const handleApplyResize = async () => {
-    if (!currentDisplayUrl || !originalImageDimensionsRef.current) return;
-    if (editDimensions.width <= 0 || editDimensions.height <= 0) {
+
+  const handleApplyResize = async (newWidth: number, newHeight: number) => { 
+    if (!currentDisplayUrl || !originalImageDimensions) return;
+    if (newWidth <= 0 || newHeight <= 0) {
         toast({ title: "Invalid Dimensions", description: "Width and height must be positive numbers.", variant: "destructive" });
         return;
     }
 
     try {
       const newImageUrl = await drawImageToCanvas(currentDisplayUrl, (ctx, img) => {
-        canvasRef.current!.width = editDimensions.width;
-        canvasRef.current!.height = editDimensions.height;
-        ctx.drawImage(img, 0, 0, editDimensions.width, editDimensions.height);
+        ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, newWidth, newHeight);
+        return { canvasWidth: newWidth, canvasHeight: newHeight };
       });
       setCurrentDisplayUrl(newImageUrl);
-      originalImageDimensionsRef.current = { width: editDimensions.width, height: editDimensions.height }; 
-      setCropArea({ x: 0, y: 0, width: editDimensions.width, height: editDimensions.height }); 
-      toast({ title: "Resize Applied", description: `Image resized to ${editDimensions.width}x${editDimensions.height}px.` });
+      setOriginalImageDimensions({ width: newWidth, height: newHeight }); 
+      // update display dimensions after resize
+      if (previewContainerRef.current) {
+        const containerWidth = previewContainerRef.current.offsetWidth;
+        const containerHeight = previewContainerRef.current.offsetHeight;
+        const aspectRatio = newWidth / newHeight;
+        let dispWidth = containerWidth;
+        let dispHeight = dispWidth / aspectRatio;
+        if (dispHeight > containerHeight) {
+            dispHeight = containerHeight;
+            dispWidth = dispHeight * aspectRatio;
+        }
+        setDisplayDimensions({ width: Math.round(dispWidth), height: Math.round(dispHeight) });
+      } else {
+        setDisplayDimensions({ width: newWidth, height: newHeight });
+      }
+      setIsResizing(false);
+      toast({ title: "Resize Applied", description: `Image resized to ${newWidth}x${newHeight}px.` });
     } catch (e: any) {
       toast({ title: "Resize Error", description: e.message, variant: "destructive" });
     }
   };
 
   const handleApplyCrop = async () => {
-    if (!currentDisplayUrl || !originalImageDimensionsRef.current) return;
-    const { x, y, width, height } = cropArea;
-     if (width <= 0 || height <= 0) {
+    if (!currentDisplayUrl || !cropArea || !originalImageDimensions || !imageRef.current) return;
+    
+    const naturalWidth = imageRef.current.naturalWidth;
+    const naturalHeight = imageRef.current.naturalHeight;
+    const displayToNaturalRatioX = naturalWidth / displayDimensions.width;
+    const displayToNaturalRatioY = naturalHeight / displayDimensions.height;
+
+    const naturalCropX = cropArea.displayX * displayToNaturalRatioX;
+    const naturalCropY = cropArea.displayY * displayToNaturalRatioY;
+    const naturalCropWidth = cropArea.displayWidth * displayToNaturalRatioX;
+    const naturalCropHeight = cropArea.displayHeight * displayToNaturalRatioY;
+
+     if (naturalCropWidth <= 0 || naturalCropHeight <= 0) {
         toast({ title: "Invalid Crop Area", description: "Crop width and height must be positive.", variant: "destructive" });
         return;
     }
-    if (x + width > originalImageDimensionsRef.current.width || y + height > originalImageDimensionsRef.current.height) {
-        toast({ title: "Invalid Crop Area", description: "Crop area extends beyond image boundaries.", variant: "destructive" });
-        return;
-    }
-
 
     try {
       const newImageUrl = await drawImageToCanvas(currentDisplayUrl, (ctx, img) => {
-        canvasRef.current!.width = width;
-        canvasRef.current!.height = height;
-        ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
+        ctx.drawImage(img, naturalCropX, naturalCropY, naturalCropWidth, naturalCropHeight, 0, 0, naturalCropWidth, naturalCropHeight);
+        return { canvasWidth: naturalCropWidth, canvasHeight: naturalCropHeight };
       });
       setCurrentDisplayUrl(newImageUrl);
-      originalImageDimensionsRef.current = { width, height }; 
-      setEditDimensions({ width, height }); 
+      setOriginalImageDimensions({ width: naturalCropWidth, height: naturalCropHeight }); 
+       if (previewContainerRef.current) {
+            const containerWidth = previewContainerRef.current.offsetWidth;
+            const containerHeight = previewContainerRef.current.offsetHeight;
+            const aspectRatio = naturalCropWidth / naturalCropHeight;
+            let newWidth = containerWidth;
+            let newHeight = newWidth / aspectRatio;
+            if (newHeight > containerHeight) {
+                newHeight = containerHeight;
+                newWidth = newHeight * aspectRatio;
+            }
+            setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+        } else {
+            setDisplayDimensions({ width: naturalCropWidth, height: naturalCropHeight });
+        }
+      setIsCropping(false);
+      setCropArea(null);
       toast({ title: "Crop Applied" });
     } catch (e: any) {
       toast({ title: "Crop Error", description: e.message, variant: "destructive" });
@@ -224,14 +287,43 @@ export function ImageGeneratorForm() {
             setCurrentDisplayUrl(dataUrl);
             const img = new window.Image();
             img.onload = () => {
-                originalImageDimensionsRef.current = { width: img.width, height: img.height };
-                setEditDimensions({ width: img.width, height: img.height });
-                setCropArea({ x: 0, y: 0, width: img.width, height: img.height });
+                if (img.naturalWidth && img.naturalHeight) { 
+                    setOriginalImageDimensions({ width: img.width, height: img.height });
+                     if (previewContainerRef.current) {
+                        const containerWidth = previewContainerRef.current.offsetWidth;
+                        const containerHeight = previewContainerRef.current.offsetHeight;
+                        const aspectRatio = img.width / img.height;
+                        let newWidth = containerWidth;
+                        let newHeight = newWidth / aspectRatio;
+                        if (newHeight > containerHeight) {
+                            newHeight = containerHeight;
+                            newWidth = newHeight * aspectRatio;
+                        }
+                        setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+                    } else {
+                       setDisplayDimensions({ width: img.width, height: img.height });
+                    }
+                    setIsCropping(false);
+                    setCropArea(null);
+                    setIsResizing(false);
+                } else {
+                     toast({title: "Error Resetting", description: "Could not get original image dimensions.", variant:"destructive"});
+                }
             };
+            img.onerror = () => {
+                 toast({title: "Error Resetting", description: "Failed to load original image for reset.", variant: "destructive"});
+            }
             img.src = dataUrl;
         };
+        reader.onerror = () => {
+            toast({title: "Error Resetting", description: "Failed to read original image data.", variant: "destructive"});
+        }
+
         fetch(generatedImageBlobUrl)
-            .then(res => res.blob())
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                return res.blob();
+            })
             .then(blob => reader.readAsDataURL(blob))
             .catch(err => {
                 toast({title: "Error Resetting", description: "Could not reload original image.", variant: "destructive"});
@@ -262,40 +354,193 @@ export function ImageGeneratorForm() {
     toast({ title: "Added to Gallery", description: "Image saved to your local gallery." });
   };
 
-  const handleResizeWidthChange = (value: number[]) => {
-    setEditDimensions(prev => ({ ...prev, width: value[0] }));
+  const handleUploadButtonClick = () => {
+    fileInputRef.current?.click();
   };
-  const handleResizeHeightChange = (value: number[]) => {
-    setEditDimensions(prev => ({ ...prev, height: value[0] }));
+
+  const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES) {
+      toast({
+        title: "Gallery Full",
+        description: `Cannot add more than ${MAX_GALLERY_IMAGES} images. Please remove some images first.`,
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = ""; 
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      setGalleryImages(prev => [dataUrl, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+      toast({
+        title: "Image Uploaded",
+        description: `${file.name} added to gallery.`,
+      });
+    };
+    reader.onerror = () => {
+      toast({
+        title: "Upload Error",
+        description: "Failed to read the image file.",
+        variant: "destructive",
+      });
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = ""; 
   };
-  const handleCropXChange = (value: number[]) => {
-    setCropArea(prev => ({ ...prev, x: value[0] }));
+
+
+  const startCrop = () => {
+    if (!imageRef.current || !previewContainerRef.current || !originalImageDimensions) return;
+    setIsCropping(true);
+    setIsResizing(false);
+
+    const imgRect = imageRef.current.getBoundingClientRect();
+    const containerRect = previewContainerRef.current.getBoundingClientRect();
+
+    const initialCropWidth = displayDimensions.width / 2;
+    const initialCropHeight = displayDimensions.height / 2;
+    const initialCropX = (displayDimensions.width - initialCropWidth) / 2;
+    const initialCropY = (displayDimensions.height - initialCropHeight) / 2;
+    
+    setCropArea({
+      x: initialCropX, // relative to image display
+      y: initialCropY,
+      width: initialCropWidth,
+      height: initialCropHeight,
+      displayX: initialCropX,
+      displayY: initialCropY,
+      displayWidth: initialCropWidth,
+      displayHeight: initialCropHeight,
+    });
   };
-  const handleCropYChange = (value: number[]) => {
-    setCropArea(prev => ({ ...prev, y: value[0] }));
+
+  const startResize = () => {
+    if (!imageRef.current || !originalImageDimensions) return;
+    setIsResizing(true);
+    setIsCropping(false);
+    setResizeHandle({
+        x: displayDimensions.width -10, // Initial position of handle
+        y: displayDimensions.height -10,
+        width: displayDimensions.width,
+        height: displayDimensions.height
+    });
   };
-  const handleCropWidthChange = (value: number[]) => {
-    setCropArea(prev => ({ ...prev, width: value[0] }));
-  };
-  const handleCropHeightChange = (value: number[]) => {
-    setCropArea(prev => ({ ...prev, height: value[0] }));
+
+  const handleMouseDown = (e: React.MouseEvent, handleType: 'crop' | 'resize' | 'crop-tl' | 'crop-tr' | 'crop-bl' | 'crop-br') => {
+    e.preventDefault();
+    if (!imageRef.current || !previewContainerRef.current || !cropArea && handleType.startsWith('crop')) return;
+
+    const imgRect = imageRef.current.getBoundingClientRect();
+    const containerRect = previewContainerRef.current.getBoundingClientRect();
+    
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    const initialCrop = cropArea ? { ...cropArea } : null;
+    const initialResizeDims = { ...displayDimensions };
+
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+
+      if (isCropping && initialCrop) {
+        let newX = initialCrop.displayX;
+        let newY = initialCrop.displayY;
+        let newWidth = initialCrop.displayWidth;
+        let newHeight = initialCrop.displayHeight;
+
+        switch (handleType) {
+            case 'crop': // Move whole crop area
+                newX = Math.max(0, Math.min(initialCrop.displayX + dx, displayDimensions.width - initialCrop.displayWidth));
+                newY = Math.max(0, Math.min(initialCrop.displayY + dy, displayDimensions.height - initialCrop.displayHeight));
+                break;
+            case 'crop-tl': // Top-left
+                newWidth = Math.max(20, initialCrop.displayWidth - dx);
+                newHeight = Math.max(20, initialCrop.displayHeight - dy);
+                newX = Math.max(0, initialCrop.displayX + dx);
+                newY = Math.max(0, initialCrop.displayY + dy);
+                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
+                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
+                break;
+            case 'crop-tr': // Top-right
+                newWidth = Math.max(20, initialCrop.displayWidth + dx);
+                newHeight = Math.max(20, initialCrop.displayHeight - dy);
+                newY = Math.max(0, initialCrop.displayY + dy);
+                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
+                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
+                break;
+            case 'crop-bl': // Bottom-left
+                newWidth = Math.max(20, initialCrop.displayWidth - dx);
+                newHeight = Math.max(20, initialCrop.displayHeight + dy);
+                newX = Math.max(0, initialCrop.displayX + dx);
+                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
+                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
+
+                break;
+            case 'crop-br': // Bottom-right
+                newWidth = Math.max(20, initialCrop.displayWidth + dx);
+                newHeight = Math.max(20, initialCrop.displayHeight + dy);
+                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
+                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
+                break;
+        }
+        
+        // Ensure crop area is within image bounds
+        newX = Math.max(0, newX);
+        newY = Math.max(0, newY);
+        newWidth = Math.min(newWidth, displayDimensions.width - newX);
+        newHeight = Math.min(newHeight, displayDimensions.height - newY);
+
+
+        setCropArea({ ...initialCrop, displayX: newX, displayY: newY, displayWidth: newWidth, displayHeight: newHeight });
+      } else if (isResizing && originalImageDimensions) {
+        const aspectRatio = originalImageDimensions.width / originalImageDimensions.height;
+        let newWidth = initialResizeDims.width + dx;
+        let newHeight = newWidth / aspectRatio;
+
+        newWidth = Math.max(50, Math.min(newWidth, previewContainerRef.current!.offsetWidth)); // Max to container width
+        newHeight = newWidth / aspectRatio;
+        
+        if (newHeight > previewContainerRef.current!.offsetHeight) {
+            newHeight = previewContainerRef.current!.offsetHeight;
+            newWidth = newHeight * aspectRatio;
+        }
+        newHeight = Math.max(50, newHeight);
+
+
+        setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+         setResizeHandle(prev => prev ? {...prev, x: Math.round(newWidth) - 10, y: Math.round(newHeight) - 10, width: Math.round(newWidth), height: Math.round(newHeight)} : null);
+      }
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
   };
 
 
   const tips = [
-    "Be specific about subject, style, and setting",
-    "Try artistic styles like \"oil painting\" or \"digital art\"",
-    "Specify lighting: \"golden hour\", \"studio lighting\"",
+    "Be specific about subject, style, and setting.",
+    "Try artistic styles like 'oil painting' or 'digital art'.",
+    "Specify lighting: 'golden hour', 'studio lighting'.",
+    "Use names of artists to guide the style.",
+    "Combine concepts: 'a cat astronaut on Mars'.",
   ];
   
-  const currentImageWidth = originalImageDimensionsRef.current?.width || 512;
-  const currentImageHeight = originalImageDimensionsRef.current?.height || 512;
-
   return (
-    <div className="w-full pt-8 pb-12 flex flex-col flex-grow"> {/* Removed specific horizontal padding, increased pb */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 flex-grow">
-        {/* Left Column: Prompt & Tips */}
-        <div className="space-y-6 lg:col-span-2">
+    <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-4 sm:px-6 lg:px-8">
+        {/* Left Column: Prompt & Tips - Adjusted to col-span-3 */}
+        <div className="space-y-6 lg:col-span-3">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -326,28 +571,81 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Middle Column: Generated Image Preview & Actions & Editing Tools */}
-        <div className="space-y-6 lg:col-span-2">
-          <Card className="shadow-lg">
-            <CardHeader><CardTitle>Generated Image</CardTitle></CardHeader>
-            <CardContent>
-              <div className="aspect-square w-full bg-muted/10 rounded-md border border-border flex items-center justify-center p-2">
+        {/* Middle Column: Generated Image Preview & Actions - Adjusted to col-span-6 */}
+        <div className="space-y-6 lg:col-span-6 flex flex-col"> 
+          <Card className="shadow-lg flex-grow flex flex-col">
+            <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Generated Image</CardTitle>
+                 {currentDisplayUrl && !isLoading && (
+                    <div className="flex space-x-2">
+                        <Button onClick={startResize} variant="outline" size="sm" disabled={isCropping || isResizing} className={isResizing ? "ring-2 ring-primary" : ""}>
+                            <Maximize className="mr-2 h-4 w-4" /> Resize
+                        </Button>
+                        <Button onClick={startCrop} variant="outline" size="sm" disabled={isCropping || isResizing} className={isCropping ? "ring-2 ring-primary" : ""}>
+                            <Crop className="mr-2 h-4 w-4" /> Crop
+                        </Button>
+                        {generatedImageBlobUrl && (
+                             <Button onClick={handleResetEdits} variant="outline" size="sm" disabled={isCropping || isResizing}>
+                                <RotateCcw className="mr-2 h-4 w-4" /> Reset
+                            </Button>
+                        )}
+                    </div>
+                 )}
+            </CardHeader>
+            <CardContent className="flex-grow flex flex-col items-center justify-center p-2 relative" ref={previewContainerRef}>
+              <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
                 {isLoading && (
                   <div className="flex flex-col items-center text-muted-foreground">
                     <Loader2 className="h-16 w-16 animate-spin text-primary mb-3" />
                     <p className="text-lg">Your vision is materializing...</p>
                   </div>
                 )}
-                {!isLoading && currentDisplayUrl && (
-                  <Image
-                    src={currentDisplayUrl}
-                    alt={prompt || 'Generated AI image'}
-                    width={originalImageDimensionsRef.current?.width || 512}
-                    height={originalImageDimensionsRef.current?.height || 512}
-                    className="object-contain w-full h-full max-w-full rounded" 
-                    data-ai-hint="generated image"
-                    priority 
-                  />
+                {!isLoading && currentDisplayUrl && originalImageDimensions && (
+                  <div style={{ width: displayDimensions.width, height: displayDimensions.height }} className="relative">
+                    <Image
+                        ref={imageRef}
+                        src={currentDisplayUrl}
+                        alt={prompt || 'Generated AI image'}
+                        width={displayDimensions.width} 
+                        height={displayDimensions.height} 
+                        className="object-contain select-none" 
+                        data-ai-hint="generated art"
+                        priority 
+                        draggable={false}
+                        onError={() => {
+                            toast({title:"Image Load Error", description: "Could not display current image.", variant:"destructive"});
+                            setCurrentDisplayUrl(null); 
+                        }}
+                      />
+                      {isCropping && cropArea && (
+                        <div
+                            className="absolute border-2 border-dashed border-primary bg-primary/20 cursor-move"
+                            style={{ 
+                                left: cropArea.displayX, 
+                                top: cropArea.displayY, 
+                                width: cropArea.displayWidth, 
+                                height: cropArea.displayHeight 
+                            }}
+                            onMouseDown={(e) => handleMouseDown(e, 'crop')}
+                        >
+                            {/* Crop handles */}
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tl')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background"></div>
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tr')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background"></div>
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-bl')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background"></div>
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-br')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background"></div>
+                        </div>
+                      )}
+                      {isResizing && resizeHandle && (
+                        <div
+                            className="absolute w-4 h-4 bg-primary rounded-full cursor-nwse-resize border-2 border-background"
+                            style={{
+                                left: resizeHandle.x -2, // center handle
+                                top: resizeHandle.y -2,
+                            }}
+                            onMouseDown={(e) => handleMouseDown(e, 'resize')}
+                        />
+                      )}
+                  </div>
                 )}
                 {!isLoading && !currentDisplayUrl && (
                   <div className="w-full h-full rounded-md border border-dashed border-border bg-muted/50 flex flex-col items-center justify-center text-muted-foreground p-8 text-center">
@@ -356,139 +654,120 @@ export function ImageGeneratorForm() {
                   </div>
                 )}
               </div>
-               {currentDisplayUrl && !isLoading && (
-                <div className="mt-4 space-y-2 sm:space-y-0 sm:space-x-2 flex flex-col sm:flex-row justify-center">
-                  <Button onClick={handleSaveToDisk} variant="outline" className="w-full sm:w-auto"><Download className="mr-2 h-4 w-4" />Save</Button>
-                  <Button onClick={handleAddToGallery} className="w-full sm:w-auto"><GalleryHorizontalEnd className="mr-2 h-4 w-4" />Add to Gallery</Button>
-                  <Button onClick={() => setIsEditing(prev => !prev)} variant="outline" className="w-full sm:w-auto">
-                    {isEditing ? 'Hide Tools' : 'Edit Image'} <Settings2 className="ml-2 h-4 w-4" />
-                  </Button>
+
+            </CardContent>
+             {currentDisplayUrl && !isLoading && (
+                <div className="p-4 border-t">
+                     {isCropping && cropArea && (
+                         <div className="flex justify-end space-x-2 mb-2">
+                            <Button onClick={handleApplyCrop} size="sm">Apply Crop</Button>
+                            <Button onClick={() => { setIsCropping(false); setCropArea(null); }} variant="outline" size="sm">Cancel</Button>
+                        </div>
+                    )}
+                    {isResizing && resizeHandle && originalImageDimensions && (
+                        <div className="space-y-2 mb-2">
+                            <div className="flex items-center space-x-2">
+                                <Label htmlFor="resizeWidth" className="w-16">Width:</Label>
+                                <Input id="resizeWidth" type="number" value={Math.round(displayDimensions.width)} 
+                                    onChange={(e) => {
+                                        const newW = parseInt(e.target.value);
+                                        if (!isNaN(newW) && newW > 0) {
+                                           const newH = Math.round(newW / (originalImageDimensions.width / originalImageDimensions.height));
+                                           setDisplayDimensions({width: newW, height: newH});
+                                           setResizeHandle(prev => prev ? {...prev, x:newW -10, y:newH-10, width: newW, height: newH} : null);
+                                        }
+                                    }}
+                                    className="h-8"
+                                />
+                                <Label htmlFor="resizeHeight" className="w-16">Height:</Label>
+                                <Input id="resizeHeight" type="number" value={Math.round(displayDimensions.height)}
+                                     onChange={(e) => {
+                                        const newH = parseInt(e.target.value);
+                                        if (!isNaN(newH) && newH > 0) {
+                                           const newW = Math.round(newH * (originalImageDimensions.width / originalImageDimensions.height));
+                                           setDisplayDimensions({width: newW, height: newH});
+                                           setResizeHandle(prev => prev ? {...prev, x:newW -10, y:newH-10, width: newW, height: newH} : null);
+                                        }
+                                    }}
+                                     className="h-8"
+                                />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                                <Button onClick={() => handleApplyResize(Math.round(displayDimensions.width), Math.round(displayDimensions.height))} size="sm">Apply Resize</Button>
+                                <Button onClick={() => { setIsResizing(false); setResizeHandle(null); handleResetEdits(); }} variant="outline" size="sm">Cancel</Button>
+                            </div>
+                        </div>
+                    )}
+                    <div className="mt-1 space-y-2 sm:space-y-0 sm:space-x-2 flex flex-col sm:flex-row justify-center">
+                    <Button onClick={handleSaveToDisk} variant="outline" className="w-full sm:w-auto" disabled={isCropping || isResizing}><Download className="mr-2 h-4 w-4" />Save</Button>
+                    <Button onClick={handleAddToGallery} className="w-full sm:w-auto" disabled={isCropping || isResizing}><GalleryHorizontalEnd className="mr-2 h-4 w-4" />Add to Gallery</Button>
+                    </div>
                 </div>
               )}
-            </CardContent>
           </Card>
-          
-          {isEditing && currentDisplayUrl && originalImageDimensionsRef.current && (
-            <Card className="shadow-lg"> 
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Edit Image</CardTitle>
-                <Button onClick={handleResetEdits} variant="outline" size="sm">
-                    <RotateCcw className="mr-2 h-4 w-4" /> Reset Edits
-                </Button>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-3 p-4 border rounded-md">
-                  <h4 className="text-lg font-semibold flex items-center"><Maximize className="mr-2 h-5 w-5 text-primary" />Resize</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 items-end">
-                    <div className="space-y-2">
-                      <Label htmlFor="resizeWidthSlider" className="text-sm">Width: {editDimensions.width}px</Label>
-                      <Slider
-                        id="resizeWidthSlider"
-                        value={[editDimensions.width]}
-                        onValueChange={handleResizeWidthChange}
-                        min={50}
-                        max={currentImageWidth * 2 > 4096 ? 4096 : (currentImageWidth * 2 || 1024)}
-                        step={1}
-                        aria-label="Resize width"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="resizeHeightSlider" className="text-sm">Height: {editDimensions.height}px</Label>
-                       <Slider
-                        id="resizeHeightSlider"
-                        value={[editDimensions.height]}
-                        onValueChange={handleResizeHeightChange}
-                        min={50}
-                        max={currentImageHeight * 2 > 4096 ? 4096 : (currentImageHeight * 2 || 1024)}
-                        step={1}
-                        aria-label="Resize height"
-                      />
-                    </div>
-                    <Button onClick={handleApplyResize} className="w-full sm:col-span-2">Apply Resize</Button>
-                  </div>
-                </div>
-
-                <div className="space-y-3 p-4 border rounded-md">
-                  <h4 className="text-lg font-semibold flex items-center"><Crop className="mr-2 h-5 w-5 text-primary"/>Crop</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6 items-end">
-                    <div className="space-y-2">
-                      <Label htmlFor="cropXSlider" className="text-sm">X: {cropArea.x}px</Label>
-                      <Slider
-                        id="cropXSlider"
-                        value={[cropArea.x]}
-                        onValueChange={handleCropXChange}
-                        min={0}
-                        max={currentImageWidth -1 } 
-                        step={1}
-                        aria-label="Crop X offset"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cropYSlider" className="text-sm">Y: {cropArea.y}px</Label>
-                      <Slider
-                        id="cropYSlider"
-                        value={[cropArea.y]}
-                        onValueChange={handleCropYChange}
-                        min={0}
-                        max={currentImageHeight -1 } 
-                        step={1}
-                        aria-label="Crop Y offset"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cropWidthSlider" className="text-sm">Width: {cropArea.width}px</Label>
-                      <Slider
-                        id="cropWidthSlider"
-                        value={[cropArea.width]}
-                        onValueChange={handleCropWidthChange}
-                        min={1}
-                        max={currentImageWidth}
-                        step={1}
-                        aria-label="Crop width"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="cropHeightSlider" className="text-sm">Height: {cropArea.height}px</Label>
-                      <Slider
-                        id="cropHeightSlider"
-                        value={[cropArea.height]}
-                        onValueChange={handleCropHeightChange}
-                        min={1}
-                        max={currentImageHeight}
-                        step={1}
-                        aria-label="Crop height"
-                      />
-                    </div>
-                    <Button onClick={handleApplyCrop} className="w-full sm:col-span-2">Apply Crop</Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
 
-        {/* Right Column: Gallery Section */}
-        <div className="lg:col-span-1">
-            <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-12rem-4rem)]"> 
-                <CardHeader><CardTitle>Image Gallery</CardTitle></CardHeader>
+        {/* Right Column: Gallery Section - Adjusted to col-span-3 */}
+        <div className="lg:col-span-3"> 
+             <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> {/* Adjusted max-h */}
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle>Image Gallery</CardTitle>
+                  <Button onClick={handleUploadButtonClick} variant="outline" size="sm">
+                    <UploadCloud className="mr-2 h-4 w-4" /> Upload
+                  </Button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    accept="image/*"
+                    className="hidden"
+                  />
+                </CardHeader>
                 <CardContent className="pt-0 flex-grow overflow-y-auto">
                 {galleryImages.length === 0 ? (
-                    <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated images!</p>
+                    <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated or uploaded images!</p>
                 ) : (
-                    <div className="grid grid-cols-1 gap-4"> {/* Changed to grid-cols-1 and gap-4 */}
+                    <div className="grid grid-cols-2 gap-4">
                     {galleryImages.map((imgDataUrl, index) => (
                         <div 
                             key={index} 
-                            className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200"
-                        > {/* Added relative, updated border, shadow, hover, focus */}
+                            className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200 cursor-pointer"
+                            onClick={() => {
+                                setCurrentDisplayUrl(imgDataUrl);
+                                const img = new window.Image();
+                                img.onload = () => {
+                                     setOriginalImageDimensions({ width: img.width, height: img.height });
+                                     if (previewContainerRef.current) {
+                                        const containerWidth = previewContainerRef.current.offsetWidth;
+                                        const containerHeight = previewContainerRef.current.offsetHeight;
+                                        const aspectRatio = img.width / img.height;
+                                        let newWidth = containerWidth;
+                                        let newHeight = newWidth / aspectRatio;
+                                        if (newHeight > containerHeight) {
+                                            newHeight = containerHeight;
+                                            newWidth = newHeight * aspectRatio;
+                                        }
+                                        setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+                                    } else {
+                                       setDisplayDimensions({ width: img.width, height: img.height });
+                                    }
+                                    setIsCropping(false); setCropArea(null); setIsResizing(false);
+                                }
+                                img.src = imgDataUrl;
+                            }}
+                        >
                           <Image 
                               src={imgDataUrl} 
                               alt={`Gallery image ${index + 1}`} 
-                              fill // Use fill for responsiveness
-                              sizes="(max-width: 1023px) 90vw, 20vw" // Adjusted sizes prop
-                              className="object-cover" // Ensure image covers the area
+                              fill
+                              sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, 10vw" 
+                              className="object-cover"
                               data-ai-hint="gallery art"
-                              priority={index < 2} // Prioritize loading first 2 images in gallery
+                              priority={index < 4}
+                              onError={(e) => {
+                                console.warn(`Failed to load gallery image at index ${index}`);
+                                (e.target as HTMLImageElement).src = 'https://picsum.photos/200/200?grayscale&blur=2'; 
+                              }}
                             />
                         </div>
                     ))}
@@ -499,7 +778,7 @@ export function ImageGeneratorForm() {
         </div>
       </div>
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-4 space-y-4 px-4 sm:px-6 lg:px-8">
         {modifiedPromptMessage && (
           <Alert variant="default" className="bg-blue-50 border-blue-200 text-blue-700">
             <AlertCircle className="h-4 w-4 !text-blue-700" />
