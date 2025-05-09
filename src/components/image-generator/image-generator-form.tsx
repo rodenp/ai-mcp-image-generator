@@ -595,7 +595,7 @@ export function ImageGeneratorForm() {
         </div>
 
         {/* Middle Column: Generated Image Preview & Actions */}
-        <div className="space-y-6 lg:col-span-4 xl:col-span-4 flex flex-col"> 
+        <div className="space-y-6 lg:col-span-4 xl:col-span-5 flex flex-col"> 
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
@@ -734,7 +734,7 @@ export function ImageGeneratorForm() {
         </div>
 
         {/* Right Column: Gallery Section */}
-        <div className="lg:col-span-4 xl:col-span-4"> 
+        <div className="lg:col-span-4 xl:col-span-3"> 
              <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> {/* Adjusted max-h */}
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
@@ -826,3 +826,4 @@ export function ImageGeneratorForm() {
     </div>
   );
 }
+
