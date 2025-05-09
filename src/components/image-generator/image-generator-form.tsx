@@ -225,6 +225,7 @@ export function ImageGeneratorForm() {
         setDisplayDimensions({ width: newWidth, height: newHeight });
       }
       setIsResizing(false);
+      setResizeHandle(null); // Ensure resize handle is cleared
       toast({ title: "Resize Applied", description: `Image resized to ${newWidth}x${newHeight}px.` });
     } catch (e: any) {
       toast({ title: "Resize Error", description: e.message, variant: "destructive" });
@@ -305,6 +306,7 @@ export function ImageGeneratorForm() {
                     setIsCropping(false);
                     setCropArea(null);
                     setIsResizing(false);
+                    setResizeHandle(null);
                 } else {
                      toast({title: "Error Resetting", description: "Could not get original image dimensions.", variant:"destructive"});
                 }
@@ -396,6 +398,8 @@ export function ImageGeneratorForm() {
     if (!imageRef.current || !previewContainerRef.current || !originalImageDimensions) return;
     setIsCropping(true);
     setIsResizing(false);
+    setResizeHandle(null);
+
 
     const initialCropWidth = displayDimensions.width / 2;
     const initialCropHeight = displayDimensions.height / 2;
@@ -418,8 +422,9 @@ export function ImageGeneratorForm() {
     if (!imageRef.current || !originalImageDimensions) return;
     setIsResizing(true);
     setIsCropping(false);
+    setCropArea(null);
     setResizeHandle({
-        x: displayDimensions.width -10, // Initial position of handle
+        x: displayDimensions.width -10, 
         y: displayDimensions.height -10,
         width: displayDimensions.width,
         height: displayDimensions.height
@@ -428,12 +433,15 @@ export function ImageGeneratorForm() {
 
   const handleMouseDown = (e: React.MouseEvent, handleType: 'crop' | 'resize' | 'crop-tl' | 'crop-tr' | 'crop-bl' | 'crop-br') => {
     e.preventDefault();
-    if (!imageRef.current || !previewContainerRef.current || !cropArea && handleType.startsWith('crop')) return;
-    
+    e.stopPropagation(); // Prevent text selection or other default drag behaviors
+    if (!imageRef.current || !previewContainerRef.current ) return;
+    if (handleType.startsWith('crop') && !cropArea && handleType !== 'crop') return; // Need cropArea for handles
+
     const startX = e.clientX;
     const startY = e.clientY;
 
     const initialCrop = cropArea ? { ...cropArea } : null;
+    // For resize, initialResizeDims should be based on the current displayDimensions of the image
     const initialResizeDims = { ...displayDimensions };
 
 
@@ -442,72 +450,94 @@ export function ImageGeneratorForm() {
       const dy = moveEvent.clientY - startY;
 
       if (isCropping && initialCrop) {
-        let newX = initialCrop.displayX;
-        let newY = initialCrop.displayY;
-        let newWidth = initialCrop.displayWidth;
-        let newHeight = initialCrop.displayHeight;
+        let newDisplayX = initialCrop.displayX;
+        let newDisplayY = initialCrop.displayY;
+        let newDisplayWidth = initialCrop.displayWidth;
+        let newDisplayHeight = initialCrop.displayHeight;
 
         switch (handleType) {
             case 'crop': // Move whole crop area
-                newX = Math.max(0, Math.min(initialCrop.displayX + dx, displayDimensions.width - initialCrop.displayWidth));
-                newY = Math.max(0, Math.min(initialCrop.displayY + dy, displayDimensions.height - initialCrop.displayHeight));
+                newDisplayX = Math.max(0, Math.min(initialCrop.displayX + dx, displayDimensions.width - initialCrop.displayWidth));
+                newDisplayY = Math.max(0, Math.min(initialCrop.displayY + dy, displayDimensions.height - initialCrop.displayHeight));
                 break;
             case 'crop-tl': // Top-left
-                newWidth = Math.max(20, initialCrop.displayWidth - dx);
-                newHeight = Math.max(20, initialCrop.displayHeight - dy);
-                newX = Math.max(0, initialCrop.displayX + dx);
-                newY = Math.max(0, initialCrop.displayY + dy);
-                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
-                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
+                newDisplayX = initialCrop.displayX + dx;
+                newDisplayY = initialCrop.displayY + dy;
+                newDisplayWidth = initialCrop.displayWidth - dx;
+                newDisplayHeight = initialCrop.displayHeight - dy;
                 break;
             case 'crop-tr': // Top-right
-                newWidth = Math.max(20, initialCrop.displayWidth + dx);
-                newHeight = Math.max(20, initialCrop.displayHeight - dy);
-                newY = Math.max(0, initialCrop.displayY + dy);
-                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
-                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
+                newDisplayY = initialCrop.displayY + dy;
+                newDisplayWidth = initialCrop.displayWidth + dx;
+                newDisplayHeight = initialCrop.displayHeight - dy;
                 break;
             case 'crop-bl': // Bottom-left
-                newWidth = Math.max(20, initialCrop.displayWidth - dx);
-                newHeight = Math.max(20, initialCrop.displayHeight + dy);
-                newX = Math.max(0, initialCrop.displayX + dx);
-                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
-                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
-
+                newDisplayX = initialCrop.displayX + dx;
+                newDisplayWidth = initialCrop.displayWidth - dx;
+                newDisplayHeight = initialCrop.displayHeight + dy;
                 break;
             case 'crop-br': // Bottom-right
-                newWidth = Math.max(20, initialCrop.displayWidth + dx);
-                newHeight = Math.max(20, initialCrop.displayHeight + dy);
-                if (newX + newWidth > displayDimensions.width) newWidth = displayDimensions.width - newX;
-                if (newY + newHeight > displayDimensions.height) newHeight = displayDimensions.height - newY;
+                newDisplayWidth = initialCrop.displayWidth + dx;
+                newDisplayHeight = initialCrop.displayHeight + dy;
                 break;
         }
         
-        // Ensure crop area is within image bounds
-        newX = Math.max(0, newX);
-        newY = Math.max(0, newY);
-        newWidth = Math.min(newWidth, displayDimensions.width - newX);
-        newHeight = Math.min(newHeight, displayDimensions.height - newY);
+        // Constrain dimensions and position
+        newDisplayX = Math.max(0, newDisplayX);
+        newDisplayY = Math.max(0, newDisplayY);
+        
+        if(handleType === 'crop-tl' || handleType === 'crop-bl') { // Handles affecting left edge
+            if(newDisplayX + Math.max(20, newDisplayWidth) > initialCrop.displayX + initialCrop.displayWidth) {
+                 newDisplayX = (initialCrop.displayX + initialCrop.displayWidth) - Math.max(20, newDisplayWidth);
+            }
+        }
+         if(handleType === 'crop-tl' || handleType === 'crop-tr') { // Handles affecting top edge
+            if(newDisplayY + Math.max(20, newDisplayHeight) > initialCrop.displayY + initialCrop.displayHeight) {
+                 newDisplayY = (initialCrop.displayY + initialCrop.displayHeight) - Math.max(20, newDisplayHeight);
+            }
+        }
+        
+        newDisplayWidth = Math.max(20, Math.min(newDisplayWidth, displayDimensions.width - newDisplayX));
+        newDisplayHeight = Math.max(20, Math.min(newDisplayHeight, displayDimensions.height - newDisplayY));
+
+        // If width/height change pushed X/Y, readjust X/Y
+        if (handleType === 'crop-tl' || handleType === 'crop-bl') {
+             newDisplayX = (initialCrop.displayX + initialCrop.displayWidth) - newDisplayWidth;
+        }
+        if (handleType === 'crop-tl' || handleType === 'crop-tr') {
+            newDisplayY = (initialCrop.displayY + initialCrop.displayHeight) - newDisplayHeight;
+        }
+
+        // Final boundary check
+        newDisplayX = Math.max(0, Math.min(newDisplayX, displayDimensions.width - newDisplayWidth));
+        newDisplayY = Math.max(0, Math.min(newDisplayY, displayDimensions.height - newDisplayHeight));
 
 
-        setCropArea({ ...initialCrop, displayX: newX, displayY: newY, displayWidth: newWidth, displayHeight: newHeight });
+        setCropArea({ ...initialCrop, displayX: newDisplayX, displayY: newDisplayY, displayWidth: newDisplayWidth, displayHeight: newDisplayHeight });
       } else if (isResizing && originalImageDimensions && previewContainerRef.current) {
         const aspectRatio = originalImageDimensions.width / originalImageDimensions.height;
-        let newWidth = initialResizeDims.width + dx;
-        let newHeight = newWidth / aspectRatio;
+        
+        // Determine new width based on horizontal drag, maintain aspect ratio for height
+        let newWidth = initialResizeDims.width + dx; 
+        
+        // Or, determine new height based on vertical drag, maintain aspect ratio for width
+        // let newHeightAttempt = initialResizeDims.height + dy;
+        // let newWidthFromHeight = newHeightAttempt * aspectRatio;
+        // if (Math.abs(dy) > Math.abs(dx)) newWidth = newWidthFromHeight;
 
-        newWidth = Math.max(50, Math.min(newWidth, previewContainerRef.current.offsetWidth)); // Max to container width
-        newHeight = newWidth / aspectRatio;
+
+        newWidth = Math.max(50, Math.min(newWidth, previewContainerRef.current.offsetWidth)); 
+        let newHeight = newWidth / aspectRatio;
         
         if (newHeight > previewContainerRef.current.offsetHeight) {
             newHeight = previewContainerRef.current.offsetHeight;
             newWidth = newHeight * aspectRatio;
         }
         newHeight = Math.max(50, newHeight);
-
+        newWidth = Math.max(50, newWidth); // Ensure width also respects min after height adjustment
 
         setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
-         setResizeHandle(prev => prev ? {...prev, x: Math.round(newWidth) - 10, y: Math.round(newHeight) - 10, width: Math.round(newWidth), height: Math.round(newHeight)} : null);
+        setResizeHandle(prev => prev ? {...prev, x: Math.round(newWidth) - 10, y: Math.round(newHeight) - 10, width: Math.round(newWidth), height: Math.round(newHeight)} : null);
       }
     };
 
@@ -532,8 +562,8 @@ export function ImageGeneratorForm() {
   return (
     <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-4 sm:px-6 lg:px-8">
-        {/* Left Column: Prompt & Tips - Adjusted to col-span-4 */}
-        <div className="space-y-6 lg:col-span-4">
+        {/* Left Column: Prompt & Tips */}
+        <div className="space-y-6 lg:col-span-4 xl:col-span-3">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -564,20 +594,20 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Middle Column: Generated Image Preview & Actions - Adjusted to col-span-5 */}
-        <div className="space-y-6 lg:col-span-5 flex flex-col"> 
+        {/* Middle Column: Generated Image Preview & Actions */}
+        <div className="space-y-6 lg:col-span-5 xl:col-span-6 flex flex-col"> 
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
                  {currentDisplayUrl && !isLoading && (
                     <div className="flex space-x-2">
-                        <Button onClick={startResize} variant="outline" size="sm" disabled={isCropping || isResizing} className={isResizing ? "ring-2 ring-primary" : ""}>
+                        <Button onClick={startResize} variant="outline" size="sm" disabled={isCropping} className={isResizing ? "ring-2 ring-primary" : ""}>
                             <Maximize className="mr-2 h-4 w-4" /> Resize
                         </Button>
-                        <Button onClick={startCrop} variant="outline" size="sm" disabled={isCropping || isResizing} className={isCropping ? "ring-2 ring-primary" : ""}>
+                        <Button onClick={startCrop} variant="outline" size="sm" disabled={isResizing} className={isCropping ? "ring-2 ring-primary" : ""}>
                             <Crop className="mr-2 h-4 w-4" /> Crop
                         </Button>
-                        {generatedImageBlobUrl && (
+                        {generatedImageBlobUrl && ( /* Only show reset if there's an original blob */
                              <Button onClick={handleResetEdits} variant="outline" size="sm" disabled={isCropping || isResizing}>
                                 <RotateCcw className="mr-2 h-4 w-4" /> Reset
                             </Button>
@@ -586,7 +616,7 @@ export function ImageGeneratorForm() {
                  )}
             </CardHeader>
             <CardContent className="flex-grow flex flex-col items-center justify-center p-2 relative" ref={previewContainerRef}>
-              <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+              <div className="relative w-full h-full flex items-center justify-center overflow-hidden"> {/* This div ensures centering and contains the image and its interactive elements */}
                 {isLoading && (
                   <div className="flex flex-col items-center text-muted-foreground">
                     <Loader2 className="h-16 w-16 animate-spin text-primary mb-3" />
@@ -594,7 +624,7 @@ export function ImageGeneratorForm() {
                   </div>
                 )}
                 {!isLoading && currentDisplayUrl && originalImageDimensions && (
-                  <div style={{ width: displayDimensions.width, height: displayDimensions.height }} className="relative">
+                  <div style={{ width: displayDimensions.width, height: displayDimensions.height }} className="relative"> {/* This div takes the displayDimensions */}
                     <Image
                         ref={imageRef}
                         src={currentDisplayUrl}
@@ -605,6 +635,7 @@ export function ImageGeneratorForm() {
                         data-ai-hint="generated art"
                         priority 
                         draggable={false}
+                        onDragStart={(e) => e.preventDefault()} // Extra precaution
                         onError={() => {
                             toast({title:"Image Load Error", description: "Could not display current image.", variant:"destructive"});
                             setCurrentDisplayUrl(null); 
@@ -617,23 +648,25 @@ export function ImageGeneratorForm() {
                                 left: cropArea.displayX, 
                                 top: cropArea.displayY, 
                                 width: cropArea.displayWidth, 
-                                height: cropArea.displayHeight 
+                                height: cropArea.displayHeight,
+                                touchAction: 'none', // For touch devices
                             }}
                             onMouseDown={(e) => handleMouseDown(e, 'crop')}
                         >
                             {/* Crop handles */}
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tl')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background"></div>
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tr')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background"></div>
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-bl')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background"></div>
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-br')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background"></div>
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tl')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background" style={{touchAction: 'none'}}></div>
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tr')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{touchAction: 'none'}}></div>
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-bl')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{touchAction: 'none'}}></div>
+                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-br')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background" style={{touchAction: 'none'}}></div>
                         </div>
                       )}
                       {isResizing && resizeHandle && (
                         <div
                             className="absolute w-4 h-4 bg-primary rounded-full cursor-nwse-resize border-2 border-background"
                             style={{
-                                left: resizeHandle.x -2, // center handle
+                                left: resizeHandle.x -2, 
                                 top: resizeHandle.y -2,
+                                touchAction: 'none',
                             }}
                             onMouseDown={(e) => handleMouseDown(e, 'resize')}
                         />
@@ -687,7 +720,7 @@ export function ImageGeneratorForm() {
                             </div>
                             <div className="flex justify-end space-x-2">
                                 <Button onClick={() => handleApplyResize(Math.round(displayDimensions.width), Math.round(displayDimensions.height))} size="sm">Apply Resize</Button>
-                                <Button onClick={() => { setIsResizing(false); setResizeHandle(null); handleResetEdits(); }} variant="outline" size="sm">Cancel</Button>
+                                <Button onClick={() => { setIsResizing(false); setResizeHandle(null); if (generatedImageBlobUrl) handleResetEdits(); }} variant="outline" size="sm">Cancel</Button>
                             </div>
                         </div>
                     )}
@@ -700,8 +733,8 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Right Column: Gallery Section - Adjusted to col-span-3 */}
-        <div className="lg:col-span-3"> 
+        {/* Right Column: Gallery Section */}
+        <div className="lg:col-span-3 xl:col-span-3"> 
              <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> {/* Adjusted max-h */}
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
@@ -744,7 +777,8 @@ export function ImageGeneratorForm() {
                                     } else {
                                        setDisplayDimensions({ width: img.width, height: img.height });
                                     }
-                                    setIsCropping(false); setCropArea(null); setIsResizing(false);
+                                    setIsCropping(false); setCropArea(null); 
+                                    setIsResizing(false); setResizeHandle(null);
                                 }
                                 img.src = imgDataUrl;
                             }}
@@ -753,7 +787,7 @@ export function ImageGeneratorForm() {
                               src={imgDataUrl} 
                               alt={`Gallery image ${index + 1}`} 
                               fill
-                              sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, 18vw" 
+                              sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, (max-width: 1279px) 15vw, 12vw" 
                               className="object-cover"
                               data-ai-hint="gallery art"
                               priority={index < 4}
