@@ -563,7 +563,7 @@ export function ImageGeneratorForm() {
     <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-4 sm:px-6 lg:px-8">
         {/* Left Column: Prompt & Tips */}
-        <div className="space-y-6 lg:col-span-4 xl:col-span-3">
+        <div className="space-y-6 lg:col-span-4 xl:col-span-4">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -595,7 +595,7 @@ export function ImageGeneratorForm() {
         </div>
 
         {/* Middle Column: Generated Image Preview & Actions */}
-        <div className="space-y-6 lg:col-span-5 xl:col-span-6 flex flex-col"> 
+        <div className="space-y-6 lg:col-span-4 xl:col-span-4 flex flex-col"> 
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
@@ -734,7 +734,7 @@ export function ImageGeneratorForm() {
         </div>
 
         {/* Right Column: Gallery Section */}
-        <div className="lg:col-span-3 xl:col-span-3"> 
+        <div className="lg:col-span-4 xl:col-span-4"> 
              <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> {/* Adjusted max-h */}
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
