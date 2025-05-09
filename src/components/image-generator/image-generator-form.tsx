@@ -19,7 +19,14 @@ import type { GalleryImage, NewGalleryImage } from '@/lib/db/types';
 
 
 const MAX_GALLERY_IMAGES = 20; 
-const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls';
+const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls'; // For non-DB fallback
+
+// Helper function to convert data URL to File object
+async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  return new File([blob], filename, { type: blob.type });
+}
 
 export function ImageGeneratorForm() {
   const [prompt, setPrompt] = useState<string>('');
@@ -27,7 +34,7 @@ export function ImageGeneratorForm() {
   const [error, setError] = useState<string | null>(null);
   
   const [generatedImageBlobUrl, setGeneratedImageBlobUrl] = useState<string | null>(null); 
-  const [currentDisplayUrl, setCurrentDisplayUrl] = useState<string | null>(null); 
+  const [currentDisplayUrl, setCurrentDisplayUrl] = useState<string | null>(null); // Can be object URL or data URL for display/editing
 
   const objectUrlRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -62,16 +69,15 @@ export function ImageGeneratorForm() {
           description: "Could not determine database configuration. Local storage will be used if available.",
           variant: "destructive",
         });
-        setIsDbConfigured(false); // Assume not configured on error
+        setIsDbConfigured(false);
       }
     };
     checkDbConfig();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // toast is stable
+  }, [toast]);
 
 
   useEffect(() => {
-    if (isDbConfigured === null) return; // Wait for DB config status
+    if (isDbConfigured === null) return; 
 
     const loadGallery = async () => {
       let imagesToDisplay: GalleryImage[] = [];
@@ -87,9 +93,8 @@ export function ImageGeneratorForm() {
               description: "Could not load images from the database.",
               variant: "destructive",
            });
-           // Do not fall back to localStorage if DB is configured but errored
         }
-      } else { // DB is not configured, use localStorage
+      } else { 
         console.log("Database not configured. Attempting to load from localStorage.");
         try {
           const storedGalleryJson = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
@@ -97,7 +102,7 @@ export function ImageGeneratorForm() {
             const localDataUrls: string[] = JSON.parse(storedGalleryJson);
             imagesToDisplay = localDataUrls.map((dataUrl, index) => ({
               id: `local-id-${Date.now()}-${index}`,
-              dataUrl,
+              dataUrl, // For localStorage, this is still a base64 data URL
               prompt: 'From local storage', 
               createdAt: new Date(Date.now() - index * 60000), 
             }));
@@ -168,20 +173,18 @@ export function ImageGeneratorForm() {
         });
       }
 
-      const imageBlob: GeneratedImage = await generateImage(finalPrompt);
-      const blobUrl = URL.createObjectURL(imageBlob);
-      objectUrlRef.current = blobUrl;
-      setGeneratedImageBlobUrl(blobUrl);
+      const imageBlob: GeneratedImage = await generateImage(finalPrompt); // This is a Blob
+      
+      // Create an object URL for immediate display
+      const localBlobUrl = URL.createObjectURL(imageBlob);
+      objectUrlRef.current = localBlobUrl; // Keep track to revoke later
+      setGeneratedImageBlobUrl(localBlobUrl); // Store original blob URL for reset
+      setCurrentDisplayUrl(localBlobUrl); // Display using object URL
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUrl = reader.result as string;
-        setCurrentDisplayUrl(dataUrl);
-        
-        const img = new window.Image();
-        img.onload = () => {
-          setOriginalImageDimensions({ width: img.width, height: img.height });
-          if (previewContainerRef.current) {
+      const img = new window.Image();
+      img.onload = () => {
+        setOriginalImageDimensions({ width: img.width, height: img.height });
+        if (previewContainerRef.current) {
             const containerWidth = previewContainerRef.current.offsetWidth;
             const containerHeight = previewContainerRef.current.offsetHeight;
             const aspectRatio = img.width / img.height;
@@ -195,10 +198,8 @@ export function ImageGeneratorForm() {
           } else {
             setDisplayDimensions({ width: img.width, height: img.height });
           }
-        };
-        img.src = dataUrl;
       };
-      reader.readAsDataURL(imageBlob);
+      img.src = localBlobUrl;
 
     } catch (err: any) {
       console.error('Image generation process failed:', err);
@@ -231,10 +232,12 @@ export function ImageGeneratorForm() {
         const {canvasWidth, canvasHeight} = operation(ctx, img, originalImageDimensions);
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
+        ctx.clearRect(0,0, canvasWidth, canvasHeight); // Clear canvas before drawing
         operation(ctx, img, originalImageDimensions); 
         resolve(canvas.toDataURL('image/png'));
       };
       img.onerror = () => reject(new Error("Failed to load image for canvas operation"));
+      img.crossOrigin = "anonymous"; // Important if sourceUrl is from another origin (like Firebase Storage)
       img.src = sourceUrl;
     });
   }, [originalImageDimensions]);
@@ -252,7 +255,7 @@ export function ImageGeneratorForm() {
         ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, newWidth, newHeight);
         return { canvasWidth: newWidth, canvasHeight: newHeight };
       });
-      setCurrentDisplayUrl(newImageUrl);
+      setCurrentDisplayUrl(newImageUrl); // This is now a dataURL of the resized image
       setOriginalImageDimensions({ width: newWidth, height: newHeight }); 
       if (previewContainerRef.current) {
         const containerWidth = previewContainerRef.current.offsetWidth;
@@ -299,7 +302,7 @@ export function ImageGeneratorForm() {
         ctx.drawImage(img, naturalCropX, naturalCropY, naturalCropWidth, naturalCropHeight, 0, 0, naturalCropWidth, naturalCropHeight);
         return { canvasWidth: naturalCropWidth, canvasHeight: naturalCropHeight };
       });
-      setCurrentDisplayUrl(newImageUrl);
+      setCurrentDisplayUrl(newImageUrl); // This is now a dataURL of the cropped image
       setOriginalImageDimensions({ width: naturalCropWidth, height: naturalCropHeight }); 
        if (previewContainerRef.current) {
             const containerWidth = previewContainerRef.current.offsetWidth;
@@ -324,62 +327,45 @@ export function ImageGeneratorForm() {
   };
   
   const handleResetEdits = () => {
-    if (generatedImageBlobUrl) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const dataUrl = reader.result as string;
-            setCurrentDisplayUrl(dataUrl);
-            const img = new window.Image();
-            img.onload = () => {
-                if (img.naturalWidth && img.naturalHeight) { 
-                    setOriginalImageDimensions({ width: img.width, height: img.height });
-                     if (previewContainerRef.current) {
-                        const containerWidth = previewContainerRef.current.offsetWidth;
-                        const containerHeight = previewContainerRef.current.offsetHeight;
-                        const aspectRatio = img.width / img.height;
-                        let newWidth = containerWidth;
-                        let newHeight = newWidth / aspectRatio;
-                        if (newHeight > containerHeight) {
-                            newHeight = containerHeight;
-                            newWidth = newHeight * aspectRatio;
-                        }
-                        setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
-                    } else {
-                       setDisplayDimensions({ width: img.width, height: img.height });
+    if (generatedImageBlobUrl) { // This is the original generated image blob URL
+        setCurrentDisplayUrl(generatedImageBlobUrl); // Reset display to original blob URL
+        const img = new window.Image();
+        img.onload = () => {
+            if (img.naturalWidth && img.naturalHeight) { 
+                setOriginalImageDimensions({ width: img.width, height: img.height });
+                  if (previewContainerRef.current) {
+                    const containerWidth = previewContainerRef.current.offsetWidth;
+                    const containerHeight = previewContainerRef.current.offsetHeight;
+                    const aspectRatio = img.width / img.height;
+                    let newWidth = containerWidth;
+                    let newHeight = newWidth / aspectRatio;
+                    if (newHeight > containerHeight) {
+                        newHeight = containerHeight;
+                        newWidth = newHeight * aspectRatio;
                     }
-                    setIsCropping(false);
-                    setCropArea(null);
-                    setIsResizing(false);
-                    setResizeHandle(null);
+                    setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
                 } else {
-                     toast({title: "Error Resetting", description: "Could not get original image dimensions.", variant:"destructive"});
+                    setDisplayDimensions({ width: img.width, height: img.height });
                 }
-            };
-            img.onerror = () => {
-                 toast({title: "Error Resetting", description: "Failed to load original image for reset.", variant: "destructive"});
+                setIsCropping(false);
+                setCropArea(null);
+                setIsResizing(false);
+                setResizeHandle(null);
+            } else {
+                  toast({title: "Error Resetting", description: "Could not get original image dimensions.", variant:"destructive"});
             }
-            img.src = dataUrl;
         };
-        reader.onerror = () => {
-            toast({title: "Error Resetting", description: "Failed to read original image data.", variant: "destructive"});
+        img.onerror = () => {
+              toast({title: "Error Resetting", description: "Failed to load original image for reset.", variant: "destructive"});
         }
-
-        fetch(generatedImageBlobUrl)
-            .then(res => {
-                if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-                return res.blob();
-            })
-            .then(blob => reader.readAsDataURL(blob))
-            .catch(err => {
-                toast({title: "Error Resetting", description: "Could not reload original image.", variant: "destructive"});
-                console.error("Error fetching blob for reset:", err);
-            });
-         toast({ title: "Edits Reset", description: "Image restored to original generated version." });
+        img.src = generatedImageBlobUrl; // Use the blob URL
+        toast({ title: "Edits Reset", description: "Image restored to original generated version." });
     }
   };
 
   const handleSaveToDisk = () => {
     if (!currentDisplayUrl) return;
+    // currentDisplayUrl could be an object URL or a data URL. Both work for download.
     const link = document.createElement('a');
     link.href = currentDisplayUrl;
     link.download = `${prompt.substring(0, 20).replace(/\s+/g, '_') || 'ai-image'}.png`;
@@ -389,8 +375,41 @@ export function ImageGeneratorForm() {
     toast({ title: "Image Saved", description: "Image downloaded successfully." });
   };
 
+  // New function to upload image file/blob to backend
+  const uploadImageToBackend = async (imageSource: File | Blob | string, fileName: string): Promise<string | null> => {
+    let imageFile: File;
+    if (typeof imageSource === 'string') { // If it's a data URL
+        imageFile = await dataUrlToFile(imageSource, fileName);
+    } else if (imageSource instanceof Blob && !(imageSource instanceof File)) {
+        imageFile = new File([imageSource], fileName, { type: imageSource.type });
+    } else {
+        imageFile = imageSource as File;
+    }
+
+    const formData = new FormData();
+    formData.append('image', imageFile);
+
+    try {
+      const response = await fetch('/api/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Failed to upload image (${response.status})`);
+      }
+      const result = await response.json();
+      return result.storageUrl;
+    } catch (uploadError: any) {
+      console.error("Error uploading image to backend:", uploadError);
+      toast({ title: "Upload to Backend Failed", description: uploadError.message, variant: "destructive" });
+      return null;
+    }
+  };
+
+
   const handleAddToGallery = async () => {
-    if (!currentDisplayUrl) return;
+    if (!currentDisplayUrl) return; // currentDisplayUrl is the (possibly edited) image for display
     if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES) {
         toast({ title: "Gallery Full", description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`, variant: "destructive"});
         return;
@@ -399,33 +418,55 @@ export function ImageGeneratorForm() {
         toast({ title: "Please wait", description: "Checking database configuration...", variant: "default"});
         return;
     }
-
-    const newImageEntry: NewGalleryImage = { dataUrl: currentDisplayUrl, prompt };
+    
+    setIsLoading(true); // Indicate activity for upload + DB save
 
     if (isDbConfigured) {
-      try {
-        const savedImage = await saveImageToDb(newImageEntry);
-        if (savedImage) {
-          setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt) }, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-          toast({ title: "Added to Gallery", description: "Image saved to your cloud gallery." });
-        } else {
-          // DB is configured, but saveImageToDb returned null (could be DB error or placeholder behavior)
-          toast({ title: "Save Error", description: "Failed to save image to cloud gallery. Check server logs.", variant: "destructive" });
+      // Upload to Firebase Storage first
+      const storageUrl = await uploadImageToBackend(currentDisplayUrl, `${prompt.substring(0,20) || 'gallery_image'}.png`);
+      setIsLoading(false); // Stop loading after upload attempt
+
+      if (storageUrl) {
+        const newImageEntry: NewGalleryImage = { dataUrl: storageUrl, prompt }; // dataUrl is now storageUrl
+        try {
+          const savedImage = await saveImageToDb(newImageEntry);
+          if (savedImage) {
+            setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt) }, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+            toast({ title: "Added to Cloud Gallery", description: "Image saved to your cloud gallery." });
+          } else {
+            toast({ title: "Save Error", description: "Failed to save image metadata to cloud gallery. Check server logs.", variant: "destructive" });
+          }
+        } catch (e) {
+          console.error("Error saving to DB:", e);
+          toast({ title: "Gallery Error", description: "An error occurred while saving to cloud gallery.", variant: "destructive" });
         }
-      } catch (e) {
-        console.error("Error saving to DB:", e);
-        toast({ title: "Gallery Error", description: "An error occurred while saving to cloud gallery.", variant: "destructive" });
+      } else {
+         toast({ title: "Storage Error", description: "Could not upload image to cloud storage.", variant: "destructive" });
       }
-    } else { // DB is not configured, save to localStorage
-      console.log("Database not configured, saving image to localStorage.");
+    } else { // DB is not configured, save to localStorage (still as dataURL)
+      setIsLoading(false);
+      console.log("Database not configured, saving image dataURL to localStorage.");
       try {
+        // currentDisplayUrl is likely a dataURL here or an object URL if reset. If object URL, convert to dataURL first.
+        let dataUrlToStore = currentDisplayUrl;
+        if (currentDisplayUrl.startsWith('blob:')) { // It's an object URL, need to convert
+            const response = await fetch(currentDisplayUrl);
+            const blob = await response.blob();
+            dataUrlToStore = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+
         const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
-        const updatedLocalDataUrls = [currentDisplayUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
+        const updatedLocalDataUrls = [dataUrlToStore, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
         localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
         
         const localGalleryImage: GalleryImage = {
             id: `local-gen-${Date.now()}`,
-            dataUrl: currentDisplayUrl,
+            dataUrl: dataUrlToStore, // Store the actual data URL for localStorage
             prompt,
             createdAt: new Date(),
         };
@@ -461,27 +502,35 @@ export function ImageGeneratorForm() {
         if (fileInputRef.current) fileInputRef.current.value = ""; 
         return;
     }
+    
+    setIsLoading(true); // For upload process
 
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const dataUrl = reader.result as string;
-      const newImageEntry: NewGalleryImage = { dataUrl, prompt: `Uploaded: ${file.name}` };
-      
-      if (isDbConfigured) {
+    if (isDbConfigured) {
+      const storageUrl = await uploadImageToBackend(file, file.name);
+      setIsLoading(false);
+      if (storageUrl) {
+        const newImageEntry: NewGalleryImage = { dataUrl: storageUrl, prompt: `Uploaded: ${file.name}` };
         try {
           const savedImage = await saveImageToDb(newImageEntry);
           if (savedImage) {
               setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt)}, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
               toast({ title: "Image Uploaded", description: `${file.name} added to cloud gallery.` });
           } else {
-              toast({ title: "Upload Error", description: `Could not save ${file.name} to cloud gallery. Check server logs.`, variant: "destructive" });
+              toast({ title: "Upload Error", description: `Could not save ${file.name} metadata to cloud gallery. Check server logs.`, variant: "destructive" });
           }
         } catch (e) {
           console.error("Error saving uploaded image to DB:", e);
-          toast({ title: "Upload Error", description: "Could not save uploaded image to database.", variant: "destructive" });
+          toast({ title: "Upload Error", description: "Could not save uploaded image metadata to database.", variant: "destructive" });
         }
-      } else { // DB not configured, save to localStorage
-        console.log("Database not configured, saving uploaded image to localStorage.");
+      } else {
+         toast({ title: "Storage Error", description: `Could not upload ${file.name} to cloud storage.`, variant: "destructive" });
+      }
+    } else { // DB not configured, save to localStorage
+      setIsLoading(false);
+      console.log("Database not configured, saving uploaded image dataURL to localStorage.");
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const dataUrl = reader.result as string;
         try {
           const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
           const updatedLocalDataUrls = [dataUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
@@ -497,20 +546,15 @@ export function ImageGeneratorForm() {
           toast({ title: "Image Uploaded Locally", description: `${file.name} added to local gallery as DB is not configured.` });
         } catch (localError) {
           console.error("Error saving uploaded image to localStorage:", localError);
-           toast({ title: "Local Storage Error", description: "Could not save uploaded image to local storage.", variant: "destructive" });
+          toast({ title: "Local Storage Error", description: "Could not save uploaded image to local storage.", variant: "destructive" });
         }
-      }
-
-      if (fileInputRef.current) fileInputRef.current.value = ""; 
-    };
-    reader.onerror = () => {
-      toast({
-        title: "Upload Error",
-        description: "Failed to read the image file.",
-        variant: "destructive",
-      });
-    };
-    reader.readAsDataURL(file);
+      };
+      reader.onerror = () => {
+        toast({ title: "Upload Error", description: "Failed to read the image file for local storage.", variant: "destructive"});
+      };
+      reader.readAsDataURL(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ""; 
   };
 
 
@@ -828,8 +872,8 @@ export function ImageGeneratorForm() {
                         </div>
                     )}
                     <div className="mt-1 space-y-2 sm:space-y-0 sm:space-x-2 flex flex-col sm:flex-row justify-center">
-                    <Button onClick={handleSaveToDisk} variant="outline" className="w-full sm:w-auto" disabled={isCropping || isResizing}><Download className="mr-2 h-4 w-4" />Save</Button>
-                    <Button onClick={handleAddToGallery} className="w-full sm:w-auto" disabled={isCropping || isResizing || isDbConfigured === null}><GalleryHorizontalEnd className="mr-2 h-4 w-4" />Add to Gallery</Button>
+                    <Button onClick={handleSaveToDisk} variant="outline" className="w-full sm:w-auto" disabled={isCropping || isResizing || isLoading}><Download className="mr-2 h-4 w-4" />Save</Button>
+                    <Button onClick={handleAddToGallery} className="w-full sm:w-auto" disabled={isCropping || isResizing || isDbConfigured === null || isLoading}><GalleryHorizontalEnd className="mr-2 h-4 w-4" />Add to Gallery</Button>
                     </div>
                 </div>
               )}
@@ -840,7 +884,7 @@ export function ImageGeneratorForm() {
              <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> 
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
-                  <Button onClick={handleUploadButtonClick} variant="outline" size="sm" disabled={isDbConfigured === null}>
+                  <Button onClick={handleUploadButtonClick} variant="outline" size="sm" disabled={isDbConfigured === null || isLoading}>
                     <UploadCloud className="mr-2 h-4 w-4" /> Upload
                   </Button>
                   <input
@@ -868,6 +912,9 @@ export function ImageGeneratorForm() {
                             key={imgEntry.id} 
                             className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200 cursor-pointer"
                             onClick={() => {
+                                // When clicking a gallery image, display it.
+                                // If it's a storage URL, it will be used directly.
+                                // If it's a local dataURL (from localStorage fallback), it's also used directly.
                                 setCurrentDisplayUrl(imgEntry.dataUrl);
                                 const img = new window.Image();
                                 img.onload = () => {
@@ -889,7 +936,10 @@ export function ImageGeneratorForm() {
                                     setIsCropping(false); setCropArea(null); 
                                     setIsResizing(false); setResizeHandle(null);
                                     setPrompt(imgEntry.prompt || ''); 
+                                    setGeneratedImageBlobUrl(null); // Clear original generated blob if loading from gallery
                                 }
+                                img.onerror = () => toast({title: "Gallery Load Error", description: "Could not load selected image.", variant:"destructive"});
+                                img.crossOrigin = "anonymous"; // For images from Firebase Storage
                                 img.src = imgEntry.dataUrl;
                             }}
                         >
