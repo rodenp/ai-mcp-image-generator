@@ -8,12 +8,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label'; // Kept for potential future use with a new library
-import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, RotateCcw, UploadCloud, Edit3, Crop, Maximize } from 'lucide-react'; 
+import { Label } from '@/components/ui/label';
+import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, RotateCcw, UploadCloud, Maximize, Crop } from 'lucide-react'; 
 import { generateImage, type GeneratedImage } from '@/services/image-generation';
 import { modifyPromptIfInappropriate, type ModifyPromptIfInappropriateOutput } from '@/ai/flows/modify-prompt-if-inappropriate';
 import { useToast } from '@/hooks/use-toast';
-import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
 
 
@@ -346,7 +345,7 @@ export function ImageGeneratorForm() {
 
   const handleAddToGallery = () => {
     if (!currentDisplayUrl) return;
-    if (galleryImages.length >= MAX_GALLERY_IMAGES && MAX_GALLERY_IMAGES > 0) {
+    if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES && MAX_GALLERY_IMAGES > 0) {
         toast({ title: "Gallery Full", description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`, variant: "destructive"});
         return;
     }
@@ -398,9 +397,6 @@ export function ImageGeneratorForm() {
     setIsCropping(true);
     setIsResizing(false);
 
-    const imgRect = imageRef.current.getBoundingClientRect();
-    const containerRect = previewContainerRef.current.getBoundingClientRect();
-
     const initialCropWidth = displayDimensions.width / 2;
     const initialCropHeight = displayDimensions.height / 2;
     const initialCropX = (displayDimensions.width - initialCropWidth) / 2;
@@ -433,9 +429,6 @@ export function ImageGeneratorForm() {
   const handleMouseDown = (e: React.MouseEvent, handleType: 'crop' | 'resize' | 'crop-tl' | 'crop-tr' | 'crop-bl' | 'crop-br') => {
     e.preventDefault();
     if (!imageRef.current || !previewContainerRef.current || !cropArea && handleType.startsWith('crop')) return;
-
-    const imgRect = imageRef.current.getBoundingClientRect();
-    const containerRect = previewContainerRef.current.getBoundingClientRect();
     
     const startX = e.clientX;
     const startY = e.clientY;
@@ -498,16 +491,16 @@ export function ImageGeneratorForm() {
 
 
         setCropArea({ ...initialCrop, displayX: newX, displayY: newY, displayWidth: newWidth, displayHeight: newHeight });
-      } else if (isResizing && originalImageDimensions) {
+      } else if (isResizing && originalImageDimensions && previewContainerRef.current) {
         const aspectRatio = originalImageDimensions.width / originalImageDimensions.height;
         let newWidth = initialResizeDims.width + dx;
         let newHeight = newWidth / aspectRatio;
 
-        newWidth = Math.max(50, Math.min(newWidth, previewContainerRef.current!.offsetWidth)); // Max to container width
+        newWidth = Math.max(50, Math.min(newWidth, previewContainerRef.current.offsetWidth)); // Max to container width
         newHeight = newWidth / aspectRatio;
         
-        if (newHeight > previewContainerRef.current!.offsetHeight) {
-            newHeight = previewContainerRef.current!.offsetHeight;
+        if (newHeight > previewContainerRef.current.offsetHeight) {
+            newHeight = previewContainerRef.current.offsetHeight;
             newWidth = newHeight * aspectRatio;
         }
         newHeight = Math.max(50, newHeight);
@@ -539,8 +532,8 @@ export function ImageGeneratorForm() {
   return (
     <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-4 sm:px-6 lg:px-8">
-        {/* Left Column: Prompt & Tips - Adjusted to col-span-3 */}
-        <div className="space-y-6 lg:col-span-3">
+        {/* Left Column: Prompt & Tips - Adjusted to col-span-4 */}
+        <div className="space-y-6 lg:col-span-4">
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -571,8 +564,8 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Middle Column: Generated Image Preview & Actions - Adjusted to col-span-6 */}
-        <div className="space-y-6 lg:col-span-6 flex flex-col"> 
+        {/* Middle Column: Generated Image Preview & Actions - Adjusted to col-span-4 */}
+        <div className="space-y-6 lg:col-span-4 flex flex-col"> 
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
@@ -671,7 +664,7 @@ export function ImageGeneratorForm() {
                                 <Input id="resizeWidth" type="number" value={Math.round(displayDimensions.width)} 
                                     onChange={(e) => {
                                         const newW = parseInt(e.target.value);
-                                        if (!isNaN(newW) && newW > 0) {
+                                        if (!isNaN(newW) && newW > 0 && originalImageDimensions) {
                                            const newH = Math.round(newW / (originalImageDimensions.width / originalImageDimensions.height));
                                            setDisplayDimensions({width: newW, height: newH});
                                            setResizeHandle(prev => prev ? {...prev, x:newW -10, y:newH-10, width: newW, height: newH} : null);
@@ -683,7 +676,7 @@ export function ImageGeneratorForm() {
                                 <Input id="resizeHeight" type="number" value={Math.round(displayDimensions.height)}
                                      onChange={(e) => {
                                         const newH = parseInt(e.target.value);
-                                        if (!isNaN(newH) && newH > 0) {
+                                        if (!isNaN(newH) && newH > 0 && originalImageDimensions) {
                                            const newW = Math.round(newH * (originalImageDimensions.width / originalImageDimensions.height));
                                            setDisplayDimensions({width: newW, height: newH});
                                            setResizeHandle(prev => prev ? {...prev, x:newW -10, y:newH-10, width: newW, height: newH} : null);
@@ -707,8 +700,8 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Right Column: Gallery Section - Adjusted to col-span-3 */}
-        <div className="lg:col-span-3"> 
+        {/* Right Column: Gallery Section - Adjusted to col-span-4 */}
+        <div className="lg:col-span-4"> 
              <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> {/* Adjusted max-h */}
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
@@ -760,7 +753,7 @@ export function ImageGeneratorForm() {
                               src={imgDataUrl} 
                               alt={`Gallery image ${index + 1}`} 
                               fill
-                              sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, 10vw" 
+                              sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, 18vw" 
                               className="object-cover"
                               data-ai-hint="gallery art"
                               priority={index < 4}
