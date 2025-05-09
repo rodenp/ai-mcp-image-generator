@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { ChangeEvent } from 'react'; 
@@ -13,10 +14,12 @@ import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, Rotate
 import { generateImage, type GeneratedImage } from '@/services/image-generation';
 import { modifyPromptIfInappropriate, type ModifyPromptIfInappropriateOutput } from '@/ai/flows/modify-prompt-if-inappropriate';
 import { useToast } from '@/hooks/use-toast';
+import { saveImageToDb, getImagesFromDb } from '@/lib/db/actions';
+import type { GalleryImage, NewGalleryImage } from '@/lib/db/types';
 
 
 const MAX_GALLERY_IMAGES = 20; 
-const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGallery';
+const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls'; // Renamed to reflect it stores data URLs
 
 export function ImageGeneratorForm() {
   const [prompt, setPrompt] = useState<string>('');
@@ -39,36 +42,62 @@ export function ImageGeneratorForm() {
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  const [galleryImages, setGalleryImages] = useState<string[]>([]);
+  const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
 
   const [modifiedPromptMessage, setModifiedPromptMessage] = useState<string | null>(null);
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    try {
-      const storedGallery = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
-      if (storedGallery) {
-        setGalleryImages(JSON.parse(storedGallery));
-      }
-    } catch (e) {
-      console.error("Failed to load gallery from localStorage", e);
-    }
-  }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(galleryImages));
-    } catch (e) {
-      console.error("Failed to save gallery to localStorage", e);
-      toast({
-        title: "Storage Error",
-        description: "Could not save all images to local gallery, storage might be full.",
-        variant: "destructive",
-      });
-    }
-  }, [galleryImages, toast]);
-  
+    const loadGallery = async () => {
+      let imagesToDisplay: GalleryImage[] = [];
+      try {
+        const dbImages = await getImagesFromDb();
+        if (dbImages && dbImages.length > 0) {
+          imagesToDisplay = dbImages.map(img => ({...img, createdAt: new Date(img.createdAt)})); // Ensure createdAt is Date object
+        } else {
+          // Fallback to localStorage if DB is empty or not configured
+          const storedGalleryJson = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
+          if (storedGalleryJson) {
+            const localDataUrls: string[] = JSON.parse(storedGalleryJson);
+            imagesToDisplay = localDataUrls.map((dataUrl, index) => ({
+              id: `local-id-${Date.now()}-${index}`,
+              dataUrl,
+              prompt: 'From local storage', // Prompt not available in old localStorage format
+              createdAt: new Date(Date.now() - index * 60000), // Approximate date
+            }));
+          }
+        }
+      } catch (e) {
+         console.error("Failed to load gallery images:", e);
+         toast({
+            title: "Gallery Load Error",
+            description: "Could not load all images for the gallery.",
+            variant: "destructive",
+         });
+          // Attempt localStorage as a final fallback on error
+          try {
+            const storedGalleryJson = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
+            if (storedGalleryJson) {
+                const localDataUrls: string[] = JSON.parse(storedGalleryJson);
+                imagesToDisplay = localDataUrls.map((dataUrl, index) => ({
+                id: `local-fallback-${Date.now()}-${index}`,
+                dataUrl,
+                prompt: 'From local storage (fallback)',
+                createdAt: new Date(Date.now() - index * 60000),
+                }));
+            }
+          } catch (localError) {
+             console.error("Failed to load gallery from localStorage as fallback:", localError);
+          }
+      }
+      setGalleryImages(imagesToDisplay.slice(0, MAX_GALLERY_IMAGES || undefined));
+    };
+
+    loadGallery();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Ran once on mount, toast is stable
 
   useEffect(() => {
     return () => {
@@ -133,7 +162,6 @@ export function ImageGeneratorForm() {
         const img = new window.Image();
         img.onload = () => {
           setOriginalImageDimensions({ width: img.width, height: img.height });
-          // Fit image within preview container while maintaining aspect ratio
           if (previewContainerRef.current) {
             const containerWidth = previewContainerRef.current.offsetWidth;
             const containerHeight = previewContainerRef.current.offsetHeight;
@@ -184,7 +212,6 @@ export function ImageGeneratorForm() {
         const {canvasWidth, canvasHeight} = operation(ctx, img, originalImageDimensions);
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
-        // Re-run operation with correct canvas dimensions
         operation(ctx, img, originalImageDimensions); 
         resolve(canvas.toDataURL('image/png'));
       };
@@ -208,7 +235,6 @@ export function ImageGeneratorForm() {
       });
       setCurrentDisplayUrl(newImageUrl);
       setOriginalImageDimensions({ width: newWidth, height: newHeight }); 
-      // update display dimensions after resize
       if (previewContainerRef.current) {
         const containerWidth = previewContainerRef.current.offsetWidth;
         const containerHeight = previewContainerRef.current.offsetHeight;
@@ -224,7 +250,7 @@ export function ImageGeneratorForm() {
         setDisplayDimensions({ width: newWidth, height: newHeight });
       }
       setIsResizing(false);
-      setResizeHandle(null); // Ensure resize handle is cleared
+      setResizeHandle(null);
       toast({ title: "Resize Applied", description: `Image resized to ${newWidth}x${newHeight}px.` });
     } catch (e: any) {
       toast({ title: "Resize Error", description: e.message, variant: "destructive" });
@@ -344,21 +370,57 @@ export function ImageGeneratorForm() {
     toast({ title: "Image Saved", description: "Image downloaded successfully." });
   };
 
-  const handleAddToGallery = () => {
+  const handleAddToGallery = async () => {
     if (!currentDisplayUrl) return;
-    if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES && MAX_GALLERY_IMAGES > 0) {
+    if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES) {
         toast({ title: "Gallery Full", description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`, variant: "destructive"});
         return;
     }
-    setGalleryImages(prev => [currentDisplayUrl!, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-    toast({ title: "Added to Gallery", description: "Image saved to your local gallery." });
+
+    const newImageEntry: NewGalleryImage = { dataUrl: currentDisplayUrl, prompt };
+    let dbSaved = false;
+    try {
+        const savedImage = await saveImageToDb(newImageEntry);
+        if (savedImage) {
+            setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt) }, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+            toast({ title: "Added to Gallery", description: "Image saved to your cloud gallery." });
+            dbSaved = true;
+        } else {
+             toast({ title: "Added to Local Gallery", description: "Image saved locally (DB not configured or save failed)." });
+        }
+    } catch (e) {
+        console.error("Error saving to DB or local gallery:", e);
+        toast({ title: "Gallery Error", description: "Failed to save image.", variant: "destructive" });
+    }
+
+    // Fallback to localStorage if DB not configured or failed
+    if (!dbSaved) {
+        try {
+            const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
+            const updatedLocalDataUrls = [currentDisplayUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
+            localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
+            
+            // Also update React state if DB failed, to show it in UI from local
+            const localGalleryImage: GalleryImage = {
+                id: `local-gen-${Date.now()}`,
+                dataUrl: currentDisplayUrl,
+                prompt,
+                createdAt: new Date(),
+            };
+            setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+        } catch (localError) {
+            console.error("Error saving to localStorage:", localError);
+            toast({ title: "Local Storage Error", description: "Could not save image to local storage.", variant: "destructive" });
+        }
+    }
   };
+
 
   const handleUploadButtonClick = () => {
     fileInputRef.current?.click();
   };
 
-  const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -373,13 +435,45 @@ export function ImageGeneratorForm() {
     }
 
     const reader = new FileReader();
-    reader.onloadend = () => {
+    reader.onloadend = async () => {
       const dataUrl = reader.result as string;
-      setGalleryImages(prev => [dataUrl, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-      toast({
-        title: "Image Uploaded",
-        description: `${file.name} added to gallery.`,
-      });
+      const newImageEntry: NewGalleryImage = { dataUrl, prompt: `Uploaded: ${file.name}` };
+      let dbSaved = false;
+
+      try {
+        const savedImage = await saveImageToDb(newImageEntry);
+        if (savedImage) {
+            setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt)}, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+            toast({ title: "Image Uploaded", description: `${file.name} added to cloud gallery.` });
+            dbSaved = true;
+        } else {
+            toast({ title: "Image Uploaded Locally", description: `${file.name} added to local gallery (DB not configured or save failed).` });
+        }
+      } catch (e) {
+        console.error("Error saving uploaded image to DB:", e);
+        toast({ title: "Upload Error", description: "Could not save uploaded image to database.", variant: "destructive" });
+      }
+      
+      if (!dbSaved) {
+          try {
+            const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
+            const updatedLocalDataUrls = [dataUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
+            localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
+
+            const localGalleryImage: GalleryImage = {
+                id: `local-upload-${Date.now()}`,
+                dataUrl,
+                prompt: `Uploaded: ${file.name}`,
+                createdAt: new Date(),
+            };
+            setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+          } catch (localError) {
+            console.error("Error saving uploaded image to localStorage:", localError);
+             toast({ title: "Local Storage Error", description: "Could not save uploaded image to local storage.", variant: "destructive" });
+          }
+      }
+
+      if (fileInputRef.current) fileInputRef.current.value = ""; 
     };
     reader.onerror = () => {
       toast({
@@ -389,7 +483,6 @@ export function ImageGeneratorForm() {
       });
     };
     reader.readAsDataURL(file);
-    if (fileInputRef.current) fileInputRef.current.value = ""; 
   };
 
 
@@ -399,14 +492,13 @@ export function ImageGeneratorForm() {
     setIsResizing(false);
     setResizeHandle(null);
 
-
     const initialCropWidth = displayDimensions.width / 2;
     const initialCropHeight = displayDimensions.height / 2;
     const initialCropX = (displayDimensions.width - initialCropWidth) / 2;
     const initialCropY = (displayDimensions.height - initialCropHeight) / 2;
     
     setCropArea({
-      x: initialCropX, // relative to image display
+      x: initialCropX, 
       y: initialCropY,
       width: initialCropWidth,
       height: initialCropHeight,
@@ -432,15 +524,14 @@ export function ImageGeneratorForm() {
 
   const handleMouseDown = (e: React.MouseEvent, handleType: 'crop' | 'resize' | 'crop-tl' | 'crop-tr' | 'crop-bl' | 'crop-br') => {
     e.preventDefault();
-    e.stopPropagation(); // Prevent text selection or other default drag behaviors
+    e.stopPropagation(); 
     if (!imageRef.current || !previewContainerRef.current ) return;
-    if (handleType.startsWith('crop') && !cropArea && handleType !== 'crop') return; // Need cropArea for handles
+    if (handleType.startsWith('crop') && !cropArea && handleType !== 'crop') return; 
 
     const startX = e.clientX;
     const startY = e.clientY;
 
     const initialCrop = cropArea ? { ...cropArea } : null;
-    // For resize, initialResizeDims should be based on the current displayDimensions of the image
     const initialResizeDims = { ...displayDimensions };
 
 
@@ -455,42 +546,41 @@ export function ImageGeneratorForm() {
         let newDisplayHeight = initialCrop.displayHeight;
 
         switch (handleType) {
-            case 'crop': // Move whole crop area
+            case 'crop': 
                 newDisplayX = Math.max(0, Math.min(initialCrop.displayX + dx, displayDimensions.width - initialCrop.displayWidth));
                 newDisplayY = Math.max(0, Math.min(initialCrop.displayY + dy, displayDimensions.height - initialCrop.displayHeight));
                 break;
-            case 'crop-tl': // Top-left
+            case 'crop-tl': 
                 newDisplayX = initialCrop.displayX + dx;
                 newDisplayY = initialCrop.displayY + dy;
                 newDisplayWidth = initialCrop.displayWidth - dx;
                 newDisplayHeight = initialCrop.displayHeight - dy;
                 break;
-            case 'crop-tr': // Top-right
+            case 'crop-tr': 
                 newDisplayY = initialCrop.displayY + dy;
                 newDisplayWidth = initialCrop.displayWidth + dx;
                 newDisplayHeight = initialCrop.displayHeight - dy;
                 break;
-            case 'crop-bl': // Bottom-left
+            case 'crop-bl': 
                 newDisplayX = initialCrop.displayX + dx;
                 newDisplayWidth = initialCrop.displayWidth - dx;
                 newDisplayHeight = initialCrop.displayHeight + dy;
                 break;
-            case 'crop-br': // Bottom-right
+            case 'crop-br': 
                 newDisplayWidth = initialCrop.displayWidth + dx;
                 newDisplayHeight = initialCrop.displayHeight + dy;
                 break;
         }
         
-        // Constrain dimensions and position
         newDisplayX = Math.max(0, newDisplayX);
         newDisplayY = Math.max(0, newDisplayY);
         
-        if(handleType === 'crop-tl' || handleType === 'crop-bl') { // Handles affecting left edge
+        if(handleType === 'crop-tl' || handleType === 'crop-bl') { 
             if(newDisplayX + Math.max(20, newDisplayWidth) > initialCrop.displayX + initialCrop.displayWidth) {
                  newDisplayX = (initialCrop.displayX + initialCrop.displayWidth) - Math.max(20, newDisplayWidth);
             }
         }
-         if(handleType === 'crop-tl' || handleType === 'crop-tr') { // Handles affecting top edge
+         if(handleType === 'crop-tl' || handleType === 'crop-tr') { 
             if(newDisplayY + Math.max(20, newDisplayHeight) > initialCrop.displayY + initialCrop.displayHeight) {
                  newDisplayY = (initialCrop.displayY + initialCrop.displayHeight) - Math.max(20, newDisplayHeight);
             }
@@ -499,7 +589,6 @@ export function ImageGeneratorForm() {
         newDisplayWidth = Math.max(20, Math.min(newDisplayWidth, displayDimensions.width - newDisplayX));
         newDisplayHeight = Math.max(20, Math.min(newDisplayHeight, displayDimensions.height - newDisplayY));
 
-        // If width/height change pushed X/Y, readjust X/Y
         if (handleType === 'crop-tl' || handleType === 'crop-bl') {
              newDisplayX = (initialCrop.displayX + initialCrop.displayWidth) - newDisplayWidth;
         }
@@ -507,24 +596,14 @@ export function ImageGeneratorForm() {
             newDisplayY = (initialCrop.displayY + initialCrop.displayHeight) - newDisplayHeight;
         }
 
-        // Final boundary check
         newDisplayX = Math.max(0, Math.min(newDisplayX, displayDimensions.width - newDisplayWidth));
         newDisplayY = Math.max(0, Math.min(newDisplayY, displayDimensions.height - newDisplayHeight));
-
 
         setCropArea({ ...initialCrop, displayX: newDisplayX, displayY: newDisplayY, displayWidth: newDisplayWidth, displayHeight: newDisplayHeight });
       } else if (isResizing && originalImageDimensions && previewContainerRef.current) {
         const aspectRatio = originalImageDimensions.width / originalImageDimensions.height;
         
-        // Determine new width based on horizontal drag, maintain aspect ratio for height
         let newWidth = initialResizeDims.width + dx; 
-        
-        // Or, determine new height based on vertical drag, maintain aspect ratio for width
-        // let newHeightAttempt = initialResizeDims.height + dy;
-        // let newWidthFromHeight = newHeightAttempt * aspectRatio;
-        // if (Math.abs(dy) > Math.abs(dx)) newWidth = newWidthFromHeight;
-
-
         newWidth = Math.max(50, Math.min(newWidth, previewContainerRef.current.offsetWidth)); 
         let newHeight = newWidth / aspectRatio;
         
@@ -533,7 +612,7 @@ export function ImageGeneratorForm() {
             newWidth = newHeight * aspectRatio;
         }
         newHeight = Math.max(50, newHeight);
-        newWidth = Math.max(50, newWidth); // Ensure width also respects min after height adjustment
+        newWidth = Math.max(50, newWidth); 
 
         setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
         setResizeHandle(prev => prev ? {...prev, x: Math.round(newWidth) - 10, y: Math.round(newHeight) - 10, width: Math.round(newWidth), height: Math.round(newHeight)} : null);
@@ -560,9 +639,8 @@ export function ImageGeneratorForm() {
   
   return (
     <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-4 sm:px-0">
-        {/* Left Column: Prompt & Tips */}
-        <div className="space-y-6 lg:col-span-4 xl:col-span-4">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-1 sm:px-2 lg:px-2">
+        <div className="space-y-6 lg:col-span-4 xl:col-span-3"> {/* Adjusted width: 4/12 -> 3/12 */}
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -593,8 +671,7 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Middle Column: Generated Image Preview & Actions */}
-        <div className="space-y-6 lg:col-span-5 xl:col-span-5 flex flex-col"> 
+        <div className="space-y-6 lg:col-span-5 xl:col-span-6 flex flex-col"> {/* Adjusted width: 5/12 -> 6/12 */}
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
@@ -606,7 +683,7 @@ export function ImageGeneratorForm() {
                         <Button onClick={startCrop} variant="outline" size="sm" disabled={isResizing} className={isCropping ? "ring-2 ring-primary" : ""}>
                             <Crop className="mr-2 h-4 w-4" /> Crop
                         </Button>
-                        {generatedImageBlobUrl && ( /* Only show reset if there's an original blob */
+                        {generatedImageBlobUrl && ( 
                              <Button onClick={handleResetEdits} variant="outline" size="sm" disabled={isCropping || isResizing}>
                                 <RotateCcw className="mr-2 h-4 w-4" /> Reset
                             </Button>
@@ -615,7 +692,7 @@ export function ImageGeneratorForm() {
                  )}
             </CardHeader>
             <CardContent className="flex-grow flex flex-col items-center justify-center p-2 relative" ref={previewContainerRef}>
-              <div className="relative w-full h-full flex items-center justify-center overflow-hidden"> {/* This div ensures centering and contains the image and its interactive elements */}
+              <div className="relative w-full h-full flex items-center justify-center overflow-hidden"> 
                 {isLoading && (
                   <div className="flex flex-col items-center text-muted-foreground">
                     <Loader2 className="h-16 w-16 animate-spin text-primary mb-3" />
@@ -623,7 +700,7 @@ export function ImageGeneratorForm() {
                   </div>
                 )}
                 {!isLoading && currentDisplayUrl && originalImageDimensions && (
-                  <div style={{ width: displayDimensions.width, height: displayDimensions.height }} className="relative"> {/* This div takes the displayDimensions */}
+                  <div style={{ width: displayDimensions.width, height: displayDimensions.height }} className="relative"> 
                     <Image
                         ref={imageRef}
                         src={currentDisplayUrl}
@@ -634,7 +711,7 @@ export function ImageGeneratorForm() {
                         data-ai-hint="generated art"
                         priority 
                         draggable={false}
-                        onDragStart={(e) => e.preventDefault()} // Extra precaution
+                        onDragStart={(e) => e.preventDefault()} 
                         onError={() => {
                             toast({title:"Image Load Error", description: "Could not display current image.", variant:"destructive"});
                             setCurrentDisplayUrl(null); 
@@ -648,11 +725,10 @@ export function ImageGeneratorForm() {
                                 top: cropArea.displayY, 
                                 width: cropArea.displayWidth, 
                                 height: cropArea.displayHeight,
-                                touchAction: 'none', // For touch devices
+                                touchAction: 'none', 
                             }}
                             onMouseDown={(e) => handleMouseDown(e, 'crop')}
                         >
-                            {/* Crop handles */}
                             <div onMouseDown={(e) => handleMouseDown(e, 'crop-tl')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background" style={{touchAction: 'none'}}></div>
                             <div onMouseDown={(e) => handleMouseDown(e, 'crop-tr')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{touchAction: 'none'}}></div>
                             <div onMouseDown={(e) => handleMouseDown(e, 'crop-bl')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{touchAction: 'none'}}></div>
@@ -732,9 +808,8 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        {/* Right Column: Gallery Section */}
         <div className="lg:col-span-3 xl:col-span-3"> 
-             <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> {/* Adjusted max-h */}
+             <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> 
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
                   <Button onClick={handleUploadButtonClick} variant="outline" size="sm">
@@ -753,12 +828,12 @@ export function ImageGeneratorForm() {
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated or uploaded images!</p>
                 ) : (
                     <div className="grid grid-cols-2 gap-4">
-                    {galleryImages.map((imgDataUrl, index) => (
+                    {galleryImages.map((imgEntry, index) => (
                         <div 
-                            key={index} 
+                            key={imgEntry.id} 
                             className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200 cursor-pointer"
                             onClick={() => {
-                                setCurrentDisplayUrl(imgDataUrl);
+                                setCurrentDisplayUrl(imgEntry.dataUrl);
                                 const img = new window.Image();
                                 img.onload = () => {
                                      setOriginalImageDimensions({ width: img.width, height: img.height });
@@ -778,20 +853,21 @@ export function ImageGeneratorForm() {
                                     }
                                     setIsCropping(false); setCropArea(null); 
                                     setIsResizing(false); setResizeHandle(null);
+                                    setPrompt(imgEntry.prompt || ''); // Optionally load prompt
                                 }
-                                img.src = imgDataUrl;
+                                img.src = imgEntry.dataUrl;
                             }}
                         >
                           <Image 
-                              src={imgDataUrl} 
-                              alt={`Gallery image ${index + 1}`} 
+                              src={imgEntry.dataUrl} 
+                              alt={imgEntry.prompt || `Gallery image ${index + 1}`}
                               fill
                               sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, (max-width: 1279px) 15vw, 12vw" 
                               className="object-cover"
                               data-ai-hint="gallery art"
                               priority={index < 4}
                               onError={(e) => {
-                                console.warn(`Failed to load gallery image at index ${index}`);
+                                console.warn(`Failed to load gallery image: ${imgEntry.id}`);
                                 (e.target as HTMLImageElement).src = 'https://picsum.photos/200/200?grayscale&blur=2'; 
                               }}
                             />
