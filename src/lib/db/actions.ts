@@ -147,16 +147,18 @@ export async function saveImageToDb(image: NewGalleryImage): Promise<GalleryImag
     } else if (config.dbType === 'mongodb' && config.mongodbUrl && config.mongodbDbName) {
       return await saveImageToMongo(image, config);
     } else {
+      // This case means DB is 'none' or misconfigured for 'postgres'/'mongodb'
+      // Returning null signals to the client that DB save didn't happen.
       if (config.dbType !== 'none') {
         console.log(`Database type ${config.dbType} configured but missing required URL/details. Image not saved to DB.`);
       } else {
-        console.log('Database not configured (DB_TYPE is "none"). Image not saved to DB.');
+         // console.log('Database not configured (DB_TYPE is "none"). Image not saved to DB.');
       }
       return null;
     }
   } catch (error) {
     console.error("Error in saveImageToDb dispatch:", error);
-    return null;
+    return null; // Ensure null is returned on any unexpected error too
   }
 }
 
@@ -171,7 +173,7 @@ export async function getImagesFromDb(): Promise<GalleryImage[]> {
        if (config.dbType !== 'none') {
         console.log(`Database type ${config.dbType} configured but missing required URL/details. Cannot fetch images from DB.`);
       } else {
-        console.log('Database not configured (DB_TYPE is "none"). Cannot fetch images from DB.');
+        // console.log('Database not configured (DB_TYPE is "none"). Cannot fetch images from DB.');
       }
       return [];
     }
@@ -254,4 +256,13 @@ export async function testDbConnection(): Promise<{success: boolean; message: st
   message = `Unsupported DB_TYPE: ${config.dbType}.`;
   console.warn(message);
   return { success: false, message, dbType: config.dbType };
+}
+
+
+export async function isDatabaseEffectivelyConfigured(): Promise<boolean> {
+  const config = getDbConfig();
+  // Returns true if dbType is 'postgres' or 'mongodb' AND their respective URLs are set.
+  // getDbConfig() itself already handles falling back to 'none' if URLs are missing for a specified type.
+  // So, we just need to check if the resulting dbType is not 'none'.
+  return config.dbType !== 'none';
 }

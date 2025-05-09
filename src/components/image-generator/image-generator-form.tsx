@@ -14,12 +14,12 @@ import { Loader2, ImageIcon, AlertCircle, Download, GalleryHorizontalEnd, Rotate
 import { generateImage, type GeneratedImage } from '@/services/image-generation';
 import { modifyPromptIfInappropriate, type ModifyPromptIfInappropriateOutput } from '@/ai/flows/modify-prompt-if-inappropriate';
 import { useToast } from '@/hooks/use-toast';
-import { saveImageToDb, getImagesFromDb } from '@/lib/db/actions';
+import { saveImageToDb, getImagesFromDb, isDatabaseEffectivelyConfigured } from '@/lib/db/actions';
 import type { GalleryImage, NewGalleryImage } from '@/lib/db/types';
 
 
 const MAX_GALLERY_IMAGES = 20; 
-const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls'; // Renamed to reflect it stores data URLs
+const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls';
 
 export function ImageGeneratorForm() {
   const [prompt, setPrompt] = useState<string>('');
@@ -43,6 +43,7 @@ export function ImageGeneratorForm() {
   const [resizeHandle, setResizeHandle] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
+  const [isDbConfigured, setIsDbConfigured] = useState<boolean | null>(null);
 
   const [modifiedPromptMessage, setModifiedPromptMessage] = useState<string | null>(null);
   const { toast } = useToast();
@@ -50,54 +51,72 @@ export function ImageGeneratorForm() {
 
 
   useEffect(() => {
+    const checkDbConfig = async () => {
+      try {
+        const configured = await isDatabaseEffectivelyConfigured();
+        setIsDbConfigured(configured);
+      } catch (err) {
+        console.error("Failed to check DB configuration:", err);
+        toast({
+          title: "Configuration Error",
+          description: "Could not determine database configuration. Local storage will be used if available.",
+          variant: "destructive",
+        });
+        setIsDbConfigured(false); // Assume not configured on error
+      }
+    };
+    checkDbConfig();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // toast is stable
+
+
+  useEffect(() => {
+    if (isDbConfigured === null) return; // Wait for DB config status
+
     const loadGallery = async () => {
       let imagesToDisplay: GalleryImage[] = [];
-      try {
-        const dbImages = await getImagesFromDb();
-        if (dbImages && dbImages.length > 0) {
-          imagesToDisplay = dbImages.map(img => ({...img, createdAt: new Date(img.createdAt)})); // Ensure createdAt is Date object
-        } else {
-          // Fallback to localStorage if DB is empty or not configured
+      if (isDbConfigured) {
+        console.log("Database is configured. Attempting to load from DB.");
+        try {
+          const dbImages = await getImagesFromDb();
+          imagesToDisplay = dbImages.map(img => ({...img, createdAt: new Date(img.createdAt)}));
+        } catch (e) {
+           console.error("Failed to load gallery images from DB:", e);
+           toast({
+              title: "Gallery Load Error",
+              description: "Could not load images from the database.",
+              variant: "destructive",
+           });
+           // Do not fall back to localStorage if DB is configured but errored
+        }
+      } else { // DB is not configured, use localStorage
+        console.log("Database not configured. Attempting to load from localStorage.");
+        try {
           const storedGalleryJson = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
           if (storedGalleryJson) {
             const localDataUrls: string[] = JSON.parse(storedGalleryJson);
             imagesToDisplay = localDataUrls.map((dataUrl, index) => ({
               id: `local-id-${Date.now()}-${index}`,
               dataUrl,
-              prompt: 'From local storage', // Prompt not available in old localStorage format
-              createdAt: new Date(Date.now() - index * 60000), // Approximate date
+              prompt: 'From local storage', 
+              createdAt: new Date(Date.now() - index * 60000), 
             }));
           }
-        }
-      } catch (e) {
-         console.error("Failed to load gallery images:", e);
-         toast({
-            title: "Gallery Load Error",
-            description: "Could not load all images for the gallery.",
+        } catch (localError) {
+           console.error("Failed to load gallery from localStorage:", localError);
+           toast({
+            title: "Local Storage Error",
+            description: "Could not load images from local storage.",
             variant: "destructive",
-         });
-          // Attempt localStorage as a final fallback on error
-          try {
-            const storedGalleryJson = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
-            if (storedGalleryJson) {
-                const localDataUrls: string[] = JSON.parse(storedGalleryJson);
-                imagesToDisplay = localDataUrls.map((dataUrl, index) => ({
-                id: `local-fallback-${Date.now()}-${index}`,
-                dataUrl,
-                prompt: 'From local storage (fallback)',
-                createdAt: new Date(Date.now() - index * 60000),
-                }));
-            }
-          } catch (localError) {
-             console.error("Failed to load gallery from localStorage as fallback:", localError);
-          }
+          });
+        }
       }
       setGalleryImages(imagesToDisplay.slice(0, MAX_GALLERY_IMAGES || undefined));
     };
 
     loadGallery();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Ran once on mount, toast is stable
+  }, [isDbConfigured, toast]);
+
 
   useEffect(() => {
     return () => {
@@ -376,42 +395,46 @@ export function ImageGeneratorForm() {
         toast({ title: "Gallery Full", description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`, variant: "destructive"});
         return;
     }
-
-    const newImageEntry: NewGalleryImage = { dataUrl: currentDisplayUrl, prompt };
-    let dbSaved = false;
-    try {
-        const savedImage = await saveImageToDb(newImageEntry);
-        if (savedImage) {
-            setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt) }, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-            toast({ title: "Added to Gallery", description: "Image saved to your cloud gallery." });
-            dbSaved = true;
-        } else {
-             toast({ title: "Added to Local Gallery", description: "Image saved locally (DB not configured or save failed)." });
-        }
-    } catch (e) {
-        console.error("Error saving to DB or local gallery:", e);
-        toast({ title: "Gallery Error", description: "Failed to save image.", variant: "destructive" });
+    if (isDbConfigured === null) {
+        toast({ title: "Please wait", description: "Checking database configuration...", variant: "default"});
+        return;
     }
 
-    // Fallback to localStorage if DB not configured or failed
-    if (!dbSaved) {
-        try {
-            const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
-            const updatedLocalDataUrls = [currentDisplayUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
-            localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
-            
-            // Also update React state if DB failed, to show it in UI from local
-            const localGalleryImage: GalleryImage = {
-                id: `local-gen-${Date.now()}`,
-                dataUrl: currentDisplayUrl,
-                prompt,
-                createdAt: new Date(),
-            };
-            setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-        } catch (localError) {
-            console.error("Error saving to localStorage:", localError);
-            toast({ title: "Local Storage Error", description: "Could not save image to local storage.", variant: "destructive" });
+    const newImageEntry: NewGalleryImage = { dataUrl: currentDisplayUrl, prompt };
+
+    if (isDbConfigured) {
+      try {
+        const savedImage = await saveImageToDb(newImageEntry);
+        if (savedImage) {
+          setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt) }, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+          toast({ title: "Added to Gallery", description: "Image saved to your cloud gallery." });
+        } else {
+          // DB is configured, but saveImageToDb returned null (could be DB error or placeholder behavior)
+          toast({ title: "Save Error", description: "Failed to save image to cloud gallery. Check server logs.", variant: "destructive" });
         }
+      } catch (e) {
+        console.error("Error saving to DB:", e);
+        toast({ title: "Gallery Error", description: "An error occurred while saving to cloud gallery.", variant: "destructive" });
+      }
+    } else { // DB is not configured, save to localStorage
+      console.log("Database not configured, saving image to localStorage.");
+      try {
+        const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
+        const updatedLocalDataUrls = [currentDisplayUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
+        localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
+        
+        const localGalleryImage: GalleryImage = {
+            id: `local-gen-${Date.now()}`,
+            dataUrl: currentDisplayUrl,
+            prompt,
+            createdAt: new Date(),
+        };
+        setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+        toast({ title: "Added to Local Gallery", description: "Image saved locally as DB is not configured." });
+      } catch (localError) {
+        console.error("Error saving to localStorage:", localError);
+        toast({ title: "Local Storage Error", description: "Could not save image to local storage.", variant: "destructive" });
+      }
     }
   };
 
@@ -433,44 +456,49 @@ export function ImageGeneratorForm() {
       if (fileInputRef.current) fileInputRef.current.value = ""; 
       return;
     }
+    if (isDbConfigured === null) {
+        toast({ title: "Please wait", description: "Checking database configuration...", variant: "default"});
+        if (fileInputRef.current) fileInputRef.current.value = ""; 
+        return;
+    }
 
     const reader = new FileReader();
     reader.onloadend = async () => {
       const dataUrl = reader.result as string;
       const newImageEntry: NewGalleryImage = { dataUrl, prompt: `Uploaded: ${file.name}` };
-      let dbSaved = false;
-
-      try {
-        const savedImage = await saveImageToDb(newImageEntry);
-        if (savedImage) {
-            setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt)}, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-            toast({ title: "Image Uploaded", description: `${file.name} added to cloud gallery.` });
-            dbSaved = true;
-        } else {
-            toast({ title: "Image Uploaded Locally", description: `${file.name} added to local gallery (DB not configured or save failed).` });
-        }
-      } catch (e) {
-        console.error("Error saving uploaded image to DB:", e);
-        toast({ title: "Upload Error", description: "Could not save uploaded image to database.", variant: "destructive" });
-      }
       
-      if (!dbSaved) {
-          try {
-            const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
-            const updatedLocalDataUrls = [dataUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
-            localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
-
-            const localGalleryImage: GalleryImage = {
-                id: `local-upload-${Date.now()}`,
-                dataUrl,
-                prompt: `Uploaded: ${file.name}`,
-                createdAt: new Date(),
-            };
-            setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-          } catch (localError) {
-            console.error("Error saving uploaded image to localStorage:", localError);
-             toast({ title: "Local Storage Error", description: "Could not save uploaded image to local storage.", variant: "destructive" });
+      if (isDbConfigured) {
+        try {
+          const savedImage = await saveImageToDb(newImageEntry);
+          if (savedImage) {
+              setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt)}, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+              toast({ title: "Image Uploaded", description: `${file.name} added to cloud gallery.` });
+          } else {
+              toast({ title: "Upload Error", description: `Could not save ${file.name} to cloud gallery. Check server logs.`, variant: "destructive" });
           }
+        } catch (e) {
+          console.error("Error saving uploaded image to DB:", e);
+          toast({ title: "Upload Error", description: "Could not save uploaded image to database.", variant: "destructive" });
+        }
+      } else { // DB not configured, save to localStorage
+        console.log("Database not configured, saving uploaded image to localStorage.");
+        try {
+          const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
+          const updatedLocalDataUrls = [dataUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
+          localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
+
+          const localGalleryImage: GalleryImage = {
+              id: `local-upload-${Date.now()}`,
+              dataUrl,
+              prompt: `Uploaded: ${file.name}`,
+              createdAt: new Date(),
+          };
+          setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+          toast({ title: "Image Uploaded Locally", description: `${file.name} added to local gallery as DB is not configured.` });
+        } catch (localError) {
+          console.error("Error saving uploaded image to localStorage:", localError);
+           toast({ title: "Local Storage Error", description: "Could not save uploaded image to local storage.", variant: "destructive" });
+        }
       }
 
       if (fileInputRef.current) fileInputRef.current.value = ""; 
@@ -640,7 +668,7 @@ export function ImageGeneratorForm() {
   return (
     <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-1 sm:px-2 lg:px-2">
-        <div className="space-y-6 lg:col-span-4 xl:col-span-3"> {/* Adjusted width: 4/12 -> 3/12 */}
+        <div className="space-y-6 lg:col-span-4 xl:col-span-3"> 
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -671,7 +699,7 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        <div className="space-y-6 lg:col-span-5 xl:col-span-6 flex flex-col"> {/* Adjusted width: 5/12 -> 6/12 */}
+        <div className="space-y-6 lg:col-span-5 xl:col-span-6 flex flex-col"> 
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
@@ -801,7 +829,7 @@ export function ImageGeneratorForm() {
                     )}
                     <div className="mt-1 space-y-2 sm:space-y-0 sm:space-x-2 flex flex-col sm:flex-row justify-center">
                     <Button onClick={handleSaveToDisk} variant="outline" className="w-full sm:w-auto" disabled={isCropping || isResizing}><Download className="mr-2 h-4 w-4" />Save</Button>
-                    <Button onClick={handleAddToGallery} className="w-full sm:w-auto" disabled={isCropping || isResizing}><GalleryHorizontalEnd className="mr-2 h-4 w-4" />Add to Gallery</Button>
+                    <Button onClick={handleAddToGallery} className="w-full sm:w-auto" disabled={isCropping || isResizing || isDbConfigured === null}><GalleryHorizontalEnd className="mr-2 h-4 w-4" />Add to Gallery</Button>
                     </div>
                 </div>
               )}
@@ -812,7 +840,7 @@ export function ImageGeneratorForm() {
              <Card className="shadow-lg h-full flex flex-col max-h-[calc(100vh-var(--header-height,6rem)-var(--footer-height,4rem)-var(--main-padding-y,3rem)-3.5rem)]"> 
                 <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Image Gallery</CardTitle>
-                  <Button onClick={handleUploadButtonClick} variant="outline" size="sm">
+                  <Button onClick={handleUploadButtonClick} variant="outline" size="sm" disabled={isDbConfigured === null}>
                     <UploadCloud className="mr-2 h-4 w-4" /> Upload
                   </Button>
                   <input
@@ -824,9 +852,16 @@ export function ImageGeneratorForm() {
                   />
                 </CardHeader>
                 <CardContent className="pt-0 flex-grow overflow-y-auto">
-                {galleryImages.length === 0 ? (
+                {isDbConfigured === null && (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                        <p>Loading gallery...</p>
+                    </div>
+                )}
+                {isDbConfigured !== null && galleryImages.length === 0 && (
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated or uploaded images!</p>
-                ) : (
+                )}
+                {isDbConfigured !== null && galleryImages.length > 0 && (
                     <div className="grid grid-cols-2 gap-4">
                     {galleryImages.map((imgEntry, index) => (
                         <div 
@@ -853,7 +888,7 @@ export function ImageGeneratorForm() {
                                     }
                                     setIsCropping(false); setCropArea(null); 
                                     setIsResizing(false); setResizeHandle(null);
-                                    setPrompt(imgEntry.prompt || ''); // Optionally load prompt
+                                    setPrompt(imgEntry.prompt || ''); 
                                 }
                                 img.src = imgEntry.dataUrl;
                             }}
