@@ -19,26 +19,22 @@ async function ensurePostgresTableInitialized(client: any): Promise<void> {
   `;
   try {
     await client.query(createTableQuery);
-    console.log("Table 'images' checked/created successfully.");
+    console.log("PostgreSQL: Table 'images' checked/created successfully.");
   } catch (err) {
-    console.error("Error ensuring 'images' table exists:", err);
+    console.error("PostgreSQL: Error ensuring 'images' table exists:", err);
     throw err; // Re-throw the error to be caught by the calling function
   }
 }
 
 
-// Placeholder for actual PostgreSQL client and logic
 async function saveImageToPostgres(image: NewGalleryImage, config: DatabaseConfig): Promise<GalleryImage | null> {
   console.log(`Attempting to save image to Postgres (URL: ${config.postgresUrl}) - Prompt: ${image.prompt?.substring(0,30)}...`);
-  // USER IMPLEMENTATION NOTE:
-  // 1. Install 'pg' package: npm install pg (or yarn add pg)
-  // 2. Ensure your POSTGRES_URL in .env is correct.
   try {
-    const { Client } = require('pg'); // Make sure 'pg' is in package.json
+    const { Client } = require('pg'); 
     const client = new Client({ connectionString: config.postgresUrl });
     await client.connect();
     try {
-      await ensurePostgresTableInitialized(client); // Create table if it doesn't exist
+      await ensurePostgresTableInitialized(client); 
 
       const res = await client.query(
         'INSERT INTO images (data_url, prompt, created_at) VALUES ($1, $2, NOW()) RETURNING id::text, data_url, prompt, created_at',
@@ -65,15 +61,12 @@ async function saveImageToPostgres(image: NewGalleryImage, config: DatabaseConfi
 
 async function getImagesFromPostgres(config: DatabaseConfig): Promise<GalleryImage[]> {
   console.log(`Attempting to get images from Postgres (URL: ${config.postgresUrl})`);
-  // USER IMPLEMENTATION NOTE:
-  // 1. Install 'pg' package: npm install pg (or yarn add pg)
-  // 2. Ensure your POSTGRES_URL in .env is correct.
   try {
-    const { Client } = require('pg'); // Make sure 'pg' is in package.json
+    const { Client } = require('pg'); 
     const client = new Client({ connectionString: config.postgresUrl });
     await client.connect();
     try {
-      await ensurePostgresTableInitialized(client); // Create table if it doesn't exist
+      await ensurePostgresTableInitialized(client); 
 
       const res = await client.query('SELECT id::text, data_url, prompt, created_at FROM images ORDER BY created_at DESC');
       console.log(`Retrieved ${res.rows.length} images from PostgreSQL.`);
@@ -91,23 +84,31 @@ async function getImagesFromPostgres(config: DatabaseConfig): Promise<GalleryIma
   }
 }
 
-// Placeholder for actual MongoDB client and logic
 async function saveImageToMongo(image: NewGalleryImage, config: DatabaseConfig): Promise<GalleryImage | null> {
   console.log(`Attempting to save image to MongoDB (URL: ${config.mongodbUrl}, DB: ${config.mongodbDbName}) - Prompt: ${image.prompt?.substring(0,30)}...`);
-  // USER IMPLEMENTATION NOTE:
-  // 1. Install 'mongodb' package: npm install mongodb (or yarn add mongodb)
-  // 2. Ensure your MONGODB_URL and MONGODB_DB_NAME in .env are correct.
   try {
-    const { MongoClient } = require('mongodb'); // Make sure 'mongodb' is in package.json
+    const { MongoClient } = require('mongodb'); 
     const client = new MongoClient(config.mongodbUrl!);
     await client.connect();
     try {
       const db = client.db(config.mongodbDbName);
-      const collection = db.collection('images'); // Collection will be created if it doesn't exist
+      
+      // Explicitly try to create collection, ignore error if it already exists
+      try {
+        await db.createCollection('images');
+        console.log("MongoDB 'images' collection created or ensured to exist.");
+      } catch (e: any) {
+        if (e.codeName === 'NamespaceExists') {
+          console.log("MongoDB 'images' collection already exists.");
+        } else {
+          throw e; // Re-throw other errors related to createCollection
+        }
+      }
+      
+      const collection = db.collection('images');
       const docToInsert = { ...image, createdAt: new Date() };
       const result = await collection.insertOne(docToInsert);
       console.log("Image saved to MongoDB successfully.");
-      // MongoDB's _id is an ObjectId, so convert it to string for consistency with GalleryImage.id
       return { ...docToInsert, id: result.insertedId.toString(), createdAt: docToInsert.createdAt };
     } catch (dbError) {
       console.error("MongoDB save error:", dbError);
@@ -124,23 +125,23 @@ async function saveImageToMongo(image: NewGalleryImage, config: DatabaseConfig):
 
 async function getImagesFromMongo(config: DatabaseConfig): Promise<GalleryImage[]> {
   console.log(`Attempting to get images from MongoDB (URL: ${config.mongodbUrl}, DB: ${config.mongodbDbName})`);
-   // USER IMPLEMENTATION NOTE:
-  // 1. Install 'mongodb' package: npm install mongodb (or yarn add mongodb)
-  // 2. Ensure your MONGODB_URL and MONGODB_DB_NAME in .env are correct.
   try {
-    const { MongoClient } = require('mongodb'); // Make sure 'mongodb' is in package.json
+    const { MongoClient } = require('mongodb'); 
     const client = new MongoClient(config.mongodbUrl!);
     await client.connect();
     try {
       const db = client.db(config.mongodbDbName);
+      // For reads, if collection doesn't exist, find will return empty.
+      // Explicit creation check isn't strictly necessary here but aligns with save if preferred.
+      // However, typical MongoDB read patterns don't require pre-creation for `find`.
       const collection = db.collection('images');
       const imagesFromDb = await collection.find().sort({ createdAt: -1 }).toArray();
       console.log(`Retrieved ${imagesFromDb.length} images from MongoDB.`);
       return imagesFromDb.map(doc => ({
-        id: doc._id.toString(), // Convert ObjectId to string
+        id: doc._id.toString(), 
         dataUrl: doc.dataUrl,
         prompt: doc.prompt,
-        createdAt: new Date(doc.createdAt), // Ensure createdAt is a Date object
+        createdAt: new Date(doc.createdAt), 
       })) as GalleryImage[];
     } catch (dbError) {
       console.error("MongoDB retrieval error:", dbError);
@@ -216,8 +217,8 @@ export async function testDbConnection(): Promise<{success: boolean; message: st
       const { Client } = require('pg');
       const client = new Client({ connectionString: config.postgresUrl, connectionTimeoutMillis: 5000 });
       await client.connect();
-      await ensurePostgresTableInitialized(client); // Also check/create table during test
-      message = 'Successfully connected to PostgreSQL and ensured table exists.';
+      await ensurePostgresTableInitialized(client); 
+      message = 'Successfully connected to PostgreSQL and ensured table "images" exists.';
       console.log(message);
       await client.end();
       return { success: true, message, dbType: config.dbType };
@@ -236,18 +237,25 @@ export async function testDbConnection(): Promise<{success: boolean; message: st
       const { MongoClient } = require('mongodb');
       const client = new MongoClient(config.mongodbUrl!, { serverSelectionTimeoutMS: 5000 });
       await client.connect();
-      await client.db(config.mongodbDbName).command({ ping: 1 }); // Verify connection to DB
-      message = `Successfully connected to MongoDB and database "${config.mongodbDbName}". Ping successful.`;
+      const db = client.db(config.mongodbDbName);
+      await db.command({ ping: 1 }); 
+      
+      // Explicitly try to create collection, ignore error if it already exists
+      try {
+        await db.createCollection('images');
+        message = `Successfully connected to MongoDB, database "${config.mongodbDbName}" pinged. Collection 'images' created or ensured to exist.`;
+      } catch (e: any) {
+        if (e.codeName === 'NamespaceExists') {
+          message = `Successfully connected to MongoDB, database "${config.mongodbDbName}" pinged. Collection 'images' already exists.`;
+        } else {
+          throw e; // Re-throw other errors related to createCollection
+        }
+      }
       console.log(message);
-      // For MongoDB, collection creation is typically automatic on first insert.
-      // You could list collections to see if 'images' exists if needed.
-      // const collections = await client.db(config.mongodbDbName).listCollections({ name: 'images' }).toArray();
-      // if (collections.length > 0) console.log("MongoDB 'images' collection exists or is ready.");
-      // else console.log("MongoDB 'images' collection will be created on first write.");
       await client.close();
       return { success: true, message, dbType: config.dbType };
     } catch (e: any) {
-      message = `Failed to connect to MongoDB. Is 'mongodb' installed and MONGODB env vars correct? Error: ${e.message}`;
+      message = `Failed to connect to MongoDB or ensure collection exists. Is 'mongodb' installed and MONGODB env vars correct? Error: ${e.message}`;
       console.error(message, e);
       return { success: false, message, dbType: config.dbType };
     }
@@ -261,8 +269,6 @@ export async function testDbConnection(): Promise<{success: boolean; message: st
 
 export async function isDatabaseEffectivelyConfigured(): Promise<boolean> {
   const config = getDbConfig();
-  // A database is effectively configured if its type is set (not 'none' or undefined)
-  // AND the necessary connection details for that type are present.
   if (!config.dbType || config.dbType === 'none' || config.dbType === undefined) {
     return false;
   }
@@ -272,7 +278,5 @@ export async function isDatabaseEffectivelyConfigured(): Promise<boolean> {
   if (config.dbType === 'mongodb' && config.mongodbUrl && config.mongodbDbName) {
     return true;
   }
-  // If dbType is set but details are missing, it's not "effectively" configured for operations.
   return false;
 }
-
