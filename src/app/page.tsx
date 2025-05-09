@@ -10,7 +10,7 @@ export default function HomePage() {
           Transform your ideas into stunning visuals
         </p>
       </header>
-      <main className="w-full max-w-7xl mx-auto flex-grow flex flex-col px-2 sm:px-3 lg:px-4"> {/* Reduced horizontal padding */}
+      <main className="w-full max-w-7xl mx-auto flex-grow flex flex-col px-1 sm:px-2 lg:px-2"> {/* Reduced horizontal padding */}
         <ImageGeneratorForm />
       </main>
       <footer className="py-6 sm:py-8 text-center text-sm text-muted-foreground w-full border-t">
