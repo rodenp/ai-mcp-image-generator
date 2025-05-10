@@ -6,6 +6,8 @@ import type { File, Fields, Files } from 'formidable';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { db } from './db';
+import multer from 'multer';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') }); // Expects .env in project root
 
@@ -17,6 +19,40 @@ const frontendBaseUrl = process.env.NEXT_PUBLIC_FRONTEND_BASE_URL;
 if (frontendBaseUrl) {
   allowedOrigins.push(frontendBaseUrl);
 }
+
+const UPLOAD_DIR = path.join(__dirname, '../public/uploads/images'); // ✅ correct
+console.log(`[INIT] Upload directory target: ${UPLOAD_DIR}`);
+if (!fs.existsSync(UPLOAD_DIR)) {
+  try {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    console.log(`[INIT] Created upload directory: ${UPLOAD_DIR}`);
+  } catch (err) {
+    console.error(`[INIT] CRITICAL: Failed to create upload directory ${UPLOAD_DIR}`, err);
+  }
+} else {
+  console.log(`[INIT] Upload directory already exists: ${UPLOAD_DIR}`);
+}
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+console.log('[STATIC] Serving /uploads/images from:', UPLOAD_DIR);
+app.use('/uploads/images', (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // 👈 critical for <img> CORS
+
+  next();
+}, express.static(UPLOAD_DIR));
 
 console.log('[INIT] Allowed Origins:', allowedOrigins);
 
@@ -53,18 +89,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   }
   next();
 });
-// --- END VERY EARLY MANUAL LOGGER AND CORS HANDLER ---
-
-const corsOptions = {
-  origin: allowedOrigins,
-//  methods: ['GET', 'POST', 'OPTIONS'],
-//  allowedHeaders: ['Content-Type', 'Authorization'],
-//  credentials: true,
-//  preflightContinue: false,
-//  optionsSuccessStatus: 204 // For OPTIONS preflight
-};
-// Global CORS middleware
-app.use(cors(corsOptions));
 
 // Middleware to log and handle requests to /upload-image path
 app.all('/upload-image', (req: Request, res: Response, next: NextFunction) => {
@@ -82,23 +106,88 @@ app.get('/healthz', (req: Request, res: Response) => {
   res.status(200).send('OK');
 });
 
-const UPLOAD_DIR = path.resolve(process.cwd(), '../public/uploads/images');
-console.log(`[INIT] Upload directory target: ${UPLOAD_DIR}`);
-if (!fs.existsSync(UPLOAD_DIR)) {
-  try {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-    console.log(`[INIT] Created upload directory: ${UPLOAD_DIR}`);
-  } catch (err) {
-    console.error(`[INIT] CRITICAL: Failed to create upload directory ${UPLOAD_DIR}`, err);
-  }
-} else {
-  console.log(`[INIT] Upload directory already exists: ${UPLOAD_DIR}`);
-}
+// --- END VERY EARLY MANUAL LOGGER AND CORS HANDLER ---
 
-// SIMPLIFIED POST HANDLER FOR /upload-image
-app.post('/upload-image', async (req: Request, res: Response) => {
-  console.log('[UPLOAD_IMAGE_HANDLER_SIMPLE] Received POST request. Responding OK.');
-  res.status(200).json({ message: 'Simplified POST received' });
+const corsOptions = {
+  origin: allowedOrigins,
+//  methods: ['GET', 'POST', 'OPTIONS'],
+//  allowedHeaders: ['Content-Type', 'Authorization'],
+//  credentials: true,
+//  preflightContinue: false,
+//  optionsSuccessStatus: 204 // For OPTIONS preflight
+};
+// Global CORS middleware
+app.use(cors(corsOptions));
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const timestamp = Date.now();
+    const sanitized = file.originalname.replace(/\s+/g, '_');
+    const uniqueName = `${timestamp}-${sanitized}`;
+    cb(null, uniqueName);
+  }
+});
+
+const upload = multer({ storage }); // ✅ now you'll get req.file.filename
+
+app.post('/upload-image', upload.single('file'), async (req, res) => {
+  try {
+    const prompt = req.body.prompt;
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const filename = req.file.filename;
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const storageUrl = `${protocol}://${host}/uploads/images/${filename}`;
+
+    if (db.type === 'postgres') {
+      const result = await db.postgresPool!.query(
+        'INSERT INTO images (storage_url, prompt) VALUES ($1, $2) RETURNING id, storage_url, prompt, created_at',
+        [storageUrl, prompt]
+      );
+
+      const row = result.rows[0];
+      res.json({
+        success: true,
+        id: row.id,
+        storageUrl: row.storage_url,
+        prompt: row.prompt,
+        createdAt: row.created_at,
+      });
+
+    } else if (db.type === 'mongodb') {
+      const client = db.mongoClient!;
+      await client.connect();
+
+      const dbName = process.env.MONGODB_DB_NAME; // not MONGODB_URL
+      const images = client.db(dbName).collection('images');
+
+      const now = new Date();
+      const insertResult = await images.insertOne({
+        storage_url: storageUrl,
+        prompt,
+        created_at: now,
+      });
+
+      res.json({
+        success: true,
+        id: insertResult.insertedId,
+        storageUrl: storageUrl,
+        prompt: prompt,
+        createdAt: now,
+      });
+
+    } else {
+      throw new Error(`Unsupported DB_TYPE: ${db.type}`);
+    }
+
+  } catch (err) {
+    console.error('Upload error:', err);
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
 });
 
 // Global error handler

@@ -23,11 +23,10 @@ async function ensurePostgresTableInitialized(client: any): Promise<void> {
   }
 }
 
-
 async function saveImageToPostgres(image: NewGalleryImage, config: DatabaseConfig): Promise<GalleryImage | null> {
   const imagePromptSnippet = image.prompt?.substring(0,30) || 'N/A';
-  // Note: image.dataUrl now contains the storage URL
-  console.log(`[saveImageToPostgres] Attempting to save image to Postgres (URL: ${config.postgresUrl}) - Prompt: ${imagePromptSnippet}, Storage URL: ${image.dataUrl.substring(0, 50)}...`);
+
+  console.log(`[saveImageToPostgres] Attempting to save image to Postgres (URL: ${config.postgresUrl}) - Prompt: ${imagePromptSnippet}, Storage URL: ${image.storageUrl.substring(0, 50)}...`);
   try {
     const { Client } = require('pg'); 
     const client = new Client({ connectionString: config.postgresUrl });
@@ -36,8 +35,8 @@ async function saveImageToPostgres(image: NewGalleryImage, config: DatabaseConfi
       await ensurePostgresTableInitialized(client); 
 
       const res = await client.query(
-        'INSERT INTO images (storage_url, prompt, created_at) VALUES ($1, $2, NOW()) RETURNING id::text, storage_url AS "dataUrl", prompt, created_at', // Alias storage_url to dataUrl for consistency
-        [image.dataUrl, image.prompt] // image.dataUrl is now the storage URL
+        'INSERT INTO images (storage_url, prompt, created_at) VALUES ($1, $2, NOW()) RETURNING id::text, storage_url AS "storageUrl", prompt, created_at', // Alias storage_url to storageUrl for consistency
+        [image.storageUrl, image.prompt] 
       );
       if (res.rows[0]) {
         console.log(`[saveImageToPostgres] Image with prompt snippet "${imagePromptSnippet}" saved to PostgreSQL successfully.`);
@@ -67,7 +66,7 @@ async function getImagesFromPostgres(config: DatabaseConfig): Promise<GalleryIma
     try {
       await ensurePostgresTableInitialized(client); 
 
-      const res = await client.query('SELECT id::text, storage_url AS "dataUrl", prompt, created_at FROM images ORDER BY created_at DESC'); // Alias storage_url
+      const res = await client.query('SELECT id::text, storage_url AS "storageUrl", prompt, created_at FROM images ORDER BY created_at DESC'); // Alias storage_url
       console.log(`[getImagesFromPostgres] Retrieved ${res.rows.length} images from PostgreSQL.`);
       return res.rows.map(row => ({...row, createdAt: new Date(row.created_at) })) as GalleryImage[];
     } catch (dbError: any) {
@@ -104,8 +103,7 @@ async function ensureMongoCollectionInitialized(db: any): Promise<void> {
 
 async function saveImageToMongo(image: NewGalleryImage, config: DatabaseConfig): Promise<GalleryImage | null> {
   const imagePromptSnippet = image.prompt?.substring(0,30) || 'N/A';
-  // Note: image.dataUrl now contains the storage URL
-  console.log(`[saveImageToMongo] Attempting to save image to MongoDB (URL: ${config.mongodbUrl}, DB: ${config.mongodbDbName}) - Prompt: ${imagePromptSnippet}, Storage URL: ${image.dataUrl.substring(0,50)}...`);
+  console.log(`[saveImageToMongo] Attempting to save image to MongoDB (URL: ${config.mongodbUrl}, DB: ${config.mongodbDbName}) - Prompt: ${imagePromptSnippet}, Storage URL: ${image.storageUrl.substring(0,50)}...`);
   try {
     const { MongoClient } = require('mongodb'); 
     const client = new MongoClient(config.mongodbUrl!);
@@ -116,11 +114,11 @@ async function saveImageToMongo(image: NewGalleryImage, config: DatabaseConfig):
       
       const collection = db.collection('images');
       // Store storage_url instead of data_url
-      const docToInsert = { storage_url: image.dataUrl, prompt: image.prompt, createdAt: new Date() };
+      const docToInsert = { storage_url: image.storageUrl, prompt: image.prompt, createdAt: new Date() };
       const result = await collection.insertOne(docToInsert);
       console.log(`[saveImageToMongo] Image with prompt snippet "${imagePromptSnippet}" saved to MongoDB successfully.`);
-      // Return with dataUrl field for consistency with GalleryImage type
-      return { id: result.insertedId.toString(), dataUrl: docToInsert.storage_url, prompt: docToInsert.prompt, createdAt: docToInsert.createdAt };
+
+      return { id: result.insertedId.toString(), storageUrl: docToInsert.storage_url, prompt: docToInsert.prompt, createdAt: docToInsert.createdAt };
     } catch (dbError: any) {
       console.error(`[saveImageToMongo] MongoDB DB operation error for prompt snippet "${imagePromptSnippet}":`, dbError.message, dbError);
       return null;
@@ -149,7 +147,7 @@ async function getImagesFromMongo(config: DatabaseConfig): Promise<GalleryImage[
       console.log(`[getImagesFromMongo] Retrieved ${imagesFromDb.length} images from MongoDB.`);
       return imagesFromDb.map((doc: any) => ({ // Add type for doc
         id: doc._id.toString(), 
-        dataUrl: doc.storage_url, // Retrieve storage_url and map to dataUrl
+        storageUrl: doc.storage_url, // Retrieve storage_url and map to storageUrl
         prompt: doc.prompt,
         createdAt: new Date(doc.createdAt), 
       })) as GalleryImage[];
@@ -169,7 +167,7 @@ async function getImagesFromMongo(config: DatabaseConfig): Promise<GalleryImage[
 
 export async function saveImageToDb(image: NewGalleryImage): Promise<GalleryImage | null> {
   const config = getDbConfig();
-  // image.dataUrl is expected to be the storage URL if DB is used
+
   try {
     if (config.dbType === 'postgres' && config.postgresUrl) {
       return await saveImageToPostgres(image, config);
@@ -229,7 +227,8 @@ export async function testDbConnection(): Promise<{success: boolean; message: st
       return { success: false, message, dbType: config.dbType };
     }
     try {
-      const { Client } = require('pg');
+
+      const { Client } = require('pg'); 
       const client = new Client({ connectionString: config.postgresUrl, connectionTimeoutMillis: 5000 });
       await client.connect();
       console.log("[testDbConnection] Successfully connected to PostgreSQL instance.");
@@ -284,8 +283,21 @@ export async function isDatabaseEffectivelyConfigured(): Promise<boolean> {
     return false;
   }
   if (config.dbType === 'postgres' && config.postgresUrl) {
-    console.log("[isDatabaseEffectivelyConfigured] Result: true (PostgreSQL with URL)");
-    return true;
+    try {
+      const { Client } = require('pg'); 
+      const client = new Client({ connectionString: config.postgresUrl, connectionTimeoutMillis: 5000 });
+      await client.connect();
+      console.log("[isDatabaseEffectivelyConfigured] Successfully connected to PostgreSQL instance.");
+      await ensurePostgresTableInitialized(client); 
+      const message = '[isDatabaseEffectivelyConfigured] Successfully connected to PostgreSQL and ensured table "images" exists.';
+      console.log(message);
+      await client.end();
+      console.log('[isDatabaseEffectivelyConfigured] Result: true (PostgreSQL with URL)');
+      return true;
+    } catch (err) {
+      console.error('[isDatabaseEffectivelyConfigured] Failed to initialize PostgreSQL:', err);
+      return false;
+    }
   }
   if (config.dbType === 'mongodb' && config.mongodbUrl && config.mongodbDbName) {
     console.log("[isDatabaseEffectivelyConfigured] Result: true (MongoDB with URL and DB Name)");

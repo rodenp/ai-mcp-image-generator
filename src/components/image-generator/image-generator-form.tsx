@@ -2,7 +2,7 @@
 "use client";
 
 import type { ChangeEvent } from 'react'; 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Image from 'next/image';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -18,13 +18,13 @@ import { saveImageToDb, getImagesFromDb, isDatabaseEffectivelyConfigured } from 
 import type { GalleryImage, NewGalleryImage } from '@/lib/db/types';
 
 const MAX_GALLERY_IMAGES = 20; 
-const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls'; // For non-DB fallback
+const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGallerystorageUrls'; // For non-DB fallback
 const base_url = process.env.NEXT_PUBLIC_BACKEND_BASE_URL;
 const BACKEND_UPLOAD_URL = `${base_url}/upload-image`; // New backend URL
 
 // Helper function to convert data URL to File object
-async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
-  const res = await fetch(dataUrl);
+async function storageUrlToFile(storageUrl: string, filename: string): Promise<File> {
+  const res = await fetch(storageUrl);
   const blob = await res.blob();
   return new File([blob], filename, { type: blob.type });
 }
@@ -100,10 +100,10 @@ export function ImageGeneratorForm() {
         try {
           const storedGalleryJson = localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY);
           if (storedGalleryJson) {
-            const localDataUrls: string[] = JSON.parse(storedGalleryJson);
-            imagesToDisplay = localDataUrls.map((dataUrl, index) => ({
+            const localstorageUrls: string[] = JSON.parse(storedGalleryJson);
+            imagesToDisplay = localstorageUrls.map((storageUrl, index) => ({
               id: `local-id-${Date.now()}-${index}`,
-              dataUrl, // For localStorage, this is still a base64 data URL
+              storageUrl, // For localStorage, this is still a base64 data URL
               prompt: 'From local storage', 
               createdAt: new Date(Date.now() - index * 60000), 
             }));
@@ -235,7 +235,7 @@ export function ImageGeneratorForm() {
         canvas.height = canvasHeight;
         ctx.clearRect(0,0, canvasWidth, canvasHeight); // Clear canvas before drawing
         operation(ctx, img, originalImageDimensions); 
-        resolve(canvas.toDataURL('image/png'));
+        resolve(canvas.tostorageUrl('image/png'));
       };
       img.onerror = () => reject(new Error("Failed to load image for canvas operation"));
       img.crossOrigin = "anonymous"; 
@@ -247,34 +247,45 @@ export function ImageGeneratorForm() {
   const handleApplyResize = async (newWidth: number, newHeight: number) => { 
     if (!currentDisplayUrl || !originalImageDimensions) return;
     if (newWidth <= 0 || newHeight <= 0) {
-        toast({ title: "Invalid Dimensions", description: "Width and height must be positive numbers.", variant: "destructive" });
-        return;
+      toast({ title: "Invalid Dimensions", description: "Width and height must be positive numbers.", variant: "destructive" });
+      return;
     }
-
+  
     try {
       const newImageUrl = await drawImageToCanvas(currentDisplayUrl, (ctx, img) => {
         ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, newWidth, newHeight);
         return { canvasWidth: newWidth, canvasHeight: newHeight };
       });
-      setCurrentDisplayUrl(newImageUrl); 
-      setOriginalImageDimensions({ width: newWidth, height: newHeight }); 
-      if (previewContainerRef.current) {
-        const containerWidth = previewContainerRef.current.offsetWidth;
-        const containerHeight = previewContainerRef.current.offsetHeight;
-        const aspectRatio = newWidth / newHeight;
-        let dispWidth = containerWidth;
-        let dispHeight = dispWidth / aspectRatio;
-        if (dispHeight > containerHeight) {
+  
+      const img = new window.Image();
+      img.onload = () => {
+        setOriginalImageDimensions({ width: img.width, height: img.height });
+  
+        if (previewContainerRef.current) {
+          const containerWidth = previewContainerRef.current.offsetWidth;
+          const containerHeight = previewContainerRef.current.offsetHeight;
+          const aspectRatio = img.width / img.height;
+          let dispWidth = containerWidth;
+          let dispHeight = dispWidth / aspectRatio;
+          if (dispHeight > containerHeight) {
             dispHeight = containerHeight;
             dispWidth = dispHeight * aspectRatio;
+          }
+          setDisplayDimensions({ width: Math.round(dispWidth), height: Math.round(dispHeight) });
+        } else {
+          setDisplayDimensions({ width: img.width, height: img.height });
         }
-        setDisplayDimensions({ width: Math.round(dispWidth), height: Math.round(dispHeight) });
-      } else {
-        setDisplayDimensions({ width: newWidth, height: newHeight });
-      }
-      setIsResizing(false);
-      setResizeHandle(null);
-      toast({ title: "Resize Applied", description: `Image resized to ${newWidth}x${newHeight}px.` });
+  
+        setCurrentDisplayUrl(newImageUrl);
+        setIsResizing(false);
+        setResizeHandle(null);
+        toast({ title: "Resize Applied", description: `Image resized to ${newWidth}x${newHeight}px.` });
+      };
+      img.onerror = () => {
+        toast({ title: "Resize Error", description: "Failed to load resized image", variant: "destructive" });
+      };
+      img.src = newImageUrl;
+  
     } catch (e: any) {
       toast({ title: "Resize Error", description: e.message, variant: "destructive" });
     }
@@ -282,46 +293,57 @@ export function ImageGeneratorForm() {
 
   const handleApplyCrop = async () => {
     if (!currentDisplayUrl || !cropArea || !originalImageDimensions || !imageRef.current) return;
-    
+  
     const naturalWidth = imageRef.current.naturalWidth;
     const naturalHeight = imageRef.current.naturalHeight;
     const displayToNaturalRatioX = naturalWidth / displayDimensions.width;
     const displayToNaturalRatioY = naturalHeight / displayDimensions.height;
-
+  
     const naturalCropX = cropArea.displayX * displayToNaturalRatioX;
     const naturalCropY = cropArea.displayY * displayToNaturalRatioY;
     const naturalCropWidth = cropArea.displayWidth * displayToNaturalRatioX;
     const naturalCropHeight = cropArea.displayHeight * displayToNaturalRatioY;
-
-     if (naturalCropWidth <= 0 || naturalCropHeight <= 0) {
-        toast({ title: "Invalid Crop Area", description: "Crop width and height must be positive.", variant: "destructive" });
-        return;
+  
+    if (naturalCropWidth <= 0 || naturalCropHeight <= 0) {
+      toast({ title: "Invalid Crop Area", description: "Crop width and height must be positive.", variant: "destructive" });
+      return;
     }
-
+  
     try {
       const newImageUrl = await drawImageToCanvas(currentDisplayUrl, (ctx, img) => {
         ctx.drawImage(img, naturalCropX, naturalCropY, naturalCropWidth, naturalCropHeight, 0, 0, naturalCropWidth, naturalCropHeight);
         return { canvasWidth: naturalCropWidth, canvasHeight: naturalCropHeight };
       });
-      setCurrentDisplayUrl(newImageUrl); 
-      setOriginalImageDimensions({ width: naturalCropWidth, height: naturalCropHeight }); 
-       if (previewContainerRef.current) {
-            const containerWidth = previewContainerRef.current.offsetWidth;
-            const containerHeight = previewContainerRef.current.offsetHeight;
-            const aspectRatio = naturalCropWidth / naturalCropHeight;
-            let newWidth = containerWidth;
-            let newHeight = newWidth / aspectRatio;
-            if (newHeight > containerHeight) {
-                newHeight = containerHeight;
-                newWidth = newHeight * aspectRatio;
-            }
-            setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+  
+      const img = new window.Image();
+      img.onload = () => {
+        setOriginalImageDimensions({ width: img.width, height: img.height });
+  
+        if (previewContainerRef.current) {
+          const containerWidth = previewContainerRef.current.offsetWidth;
+          const containerHeight = previewContainerRef.current.offsetHeight;
+          const aspectRatio = img.width / img.height;
+          let newWidth = containerWidth;
+          let newHeight = newWidth / aspectRatio;
+          if (newHeight > containerHeight) {
+            newHeight = containerHeight;
+            newWidth = newHeight * aspectRatio;
+          }
+          setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
         } else {
-            setDisplayDimensions({ width: naturalCropWidth, height: naturalCropHeight });
+          setDisplayDimensions({ width: img.width, height: img.height });
         }
-      setIsCropping(false);
-      setCropArea(null);
-      toast({ title: "Crop Applied" });
+  
+        setCurrentDisplayUrl(newImageUrl);
+        setIsCropping(false);
+        setCropArea(null);
+        toast({ title: "Crop Applied" });
+      };
+      img.onerror = () => {
+        toast({ title: "Crop Error", description: "Failed to load cropped image", variant: "destructive" });
+      };
+      img.src = newImageUrl;
+  
     } catch (e: any) {
       toast({ title: "Crop Error", description: e.message, variant: "destructive" });
     }
@@ -375,10 +397,10 @@ export function ImageGeneratorForm() {
     toast({ title: "Image Saved", description: "Image downloaded successfully." });
   };
 
-  const uploadImageToBackend = async (imageSource: File | Blob | string, fileName: string): Promise<string | null> => {
+  const uploadImageToBackend = async (imageSource: File | Blob | string, fileName: string): Promise<GalleryImage | null> => {
     let imageFile: File;
     if (typeof imageSource === 'string') { 
-        imageFile = await dataUrlToFile(imageSource, fileName);
+        imageFile = await storageUrlToFile(imageSource, fileName);
     } else if (imageSource instanceof Blob && !(imageSource instanceof File)) {
         imageFile = new File([imageSource], fileName, { type: imageSource.type });
     } else {
@@ -386,7 +408,7 @@ export function ImageGeneratorForm() {
     }
 
     const formData = new FormData();
-    formData.append('image', imageFile);
+    formData.append("file", imageFile); // ✅ use the correct variable
 
     try {
       const response = await fetch(BACKEND_UPLOAD_URL, { // Use new backend URL
@@ -398,7 +420,7 @@ export function ImageGeneratorForm() {
         throw new Error(errorData.error || `Failed to upload image (${response.status})`);
       }
       const result = await response.json();
-      return result.storageUrl;
+      return result || null; // Adjust based on your backend response
     } catch (uploadError: any) {
       console.error("Error uploading image to backend:", uploadError);
       toast({ title: "Upload to Backend Failed", description: uploadError.message, variant: "destructive" });
@@ -406,76 +428,86 @@ export function ImageGeneratorForm() {
     }
   };
 
-
+  const handleGalleryImageClick = async (imgEntry: GalleryImage) => {
+    try {
+      const res = await fetch(imgEntry.storageUrl, { mode: 'cors' });
+      if (!res.ok) throw new Error("Failed to fetch image blob");
+      const blob = await res.blob();
+      const localUrl = URL.createObjectURL(blob);
+  
+      objectUrlRef.current = localUrl;
+      setGeneratedImageBlobUrl(localUrl);
+      setCurrentDisplayUrl(localUrl); // ✅ Just like generateImage case
+  
+      const img = new window.Image();
+      img.onload = () => {
+        setOriginalImageDimensions({ width: img.width, height: img.height });
+  
+        if (previewContainerRef.current) {
+          const containerWidth = previewContainerRef.current.offsetWidth;
+          const containerHeight = previewContainerRef.current.offsetHeight;
+          const aspectRatio = img.width / img.height;
+          let newWidth = containerWidth;
+          let newHeight = newWidth / aspectRatio;
+          if (newHeight > containerHeight) {
+            newHeight = containerHeight;
+            newWidth = newHeight * aspectRatio;
+          }
+          setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+        } else {
+          setDisplayDimensions({ width: img.width, height: img.height });
+        }
+  
+        setIsCropping(false);
+        setCropArea(null);
+        setIsResizing(false);
+        setResizeHandle(null);
+        setPrompt(imgEntry.prompt || '');
+      };
+      img.onerror = () => {
+        toast({ title: "Gallery Load Error", description: "Could not load selected image.", variant: "destructive" });
+      };
+      img.src = localUrl;
+    } catch (err: any) {
+      console.error("Failed to display image from gallery:", err);
+      toast({ title: "Gallery Error", description: err.message || "Failed to load image", variant: "destructive" });
+    }
+  };
+  
   const handleAddToGallery = async () => {
     if (!currentDisplayUrl) return; 
     if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES) {
-        toast({ title: "Gallery Full", description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`, variant: "destructive"});
-        return;
+      toast({ title: "Gallery Full", description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`, variant: "destructive" });
+      return;
     }
     if (isDbConfigured === null) {
-        toast({ title: "Please wait", description: "Checking database configuration...", variant: "default"});
-        return;
+      toast({ title: "Please wait", description: "Checking database configuration...", variant: "default" });
+      return;
     }
-    
-    setIsLoading(true); 
-
+  
+    setIsLoading(true);
+  
     if (isDbConfigured) {
-      const storageUrl = await uploadImageToBackend(currentDisplayUrl, `${prompt.substring(0,20) || 'gallery_image'}.png`);
-      setIsLoading(false); 
-
-      if (storageUrl) {
-        const newImageEntry: NewGalleryImage = { dataUrl: storageUrl, prompt }; 
-        try {
-          const savedImage = await saveImageToDb(newImageEntry);
-          if (savedImage) {
-            setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt) }, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-            toast({ title: "Added to Cloud Gallery", description: "Image saved to your cloud gallery." });
-          } else {
-            toast({ title: "Save Error", description: "Failed to save image metadata to cloud gallery. Check server logs.", variant: "destructive" });
-          }
-        } catch (e) {
-          console.error("Error saving to DB:", e);
-          toast({ title: "Gallery Error", description: "An error occurred while saving to cloud gallery.", variant: "destructive" });
-        }
-      } else {
-         toast({ title: "Storage Error", description: "Could not upload image to cloud storage.", variant: "destructive" });
-      }
-    } else { 
+      const image = await uploadImageToBackend(currentDisplayUrl, `${prompt.substring(0,20) || 'gallery_image'}.png`);
       setIsLoading(false);
-      console.log("Database not configured, saving image dataURL to localStorage.");
-      try {
-        let dataUrlToStore = currentDisplayUrl;
-        if (currentDisplayUrl.startsWith('blob:')) { 
-            const response = await fetch(currentDisplayUrl);
-            const blob = await response.blob();
-            dataUrlToStore = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-
-        const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
-        const updatedLocalDataUrls = [dataUrlToStore, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
-        localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
-        
-        const localGalleryImage: GalleryImage = {
-            id: `local-gen-${Date.now()}`,
-            dataUrl: dataUrlToStore, 
-            prompt,
-            createdAt: new Date(),
+  
+      if (image) {
+        const galleryImage: GalleryImage = {
+          id: image.id,
+          storageUrl: image.storageUrl,
+          prompt: image.prompt,
+          createdAt: image.createdAt,
         };
-        setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-        toast({ title: "Added to Local Gallery", description: "Image saved locally as DB is not configured." });
-      } catch (localError) {
-        console.error("Error saving to localStorage:", localError);
-        toast({ title: "Local Storage Error", description: "Could not save image to local storage.", variant: "destructive" });
+        setGalleryImages(prev => [galleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+        toast({ title: "Added to Cloud Gallery", description: "Image saved to your cloud gallery." });
+      } else {
+        toast({ title: "Storage Error", description: "Could not upload image to cloud storage.", variant: "destructive" });
       }
+    } else {
+      setIsLoading(false);
+      toast({ title: "Database Not Configured", description: "Local fallback not supported in this context.", variant: "destructive" });
     }
   };
-
 
   const handleUploadButtonClick = () => {
     fileInputRef.current?.click();
@@ -484,74 +516,47 @@ export function ImageGeneratorForm() {
   const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
+  
     if (MAX_GALLERY_IMAGES > 0 && galleryImages.length >= MAX_GALLERY_IMAGES) {
       toast({
         title: "Gallery Full",
-        description: `Cannot add more than ${MAX_GALLERY_IMAGES} images. Please remove some images first.`,
+        description: `Cannot add more than ${MAX_GALLERY_IMAGES} images.`,
         variant: "destructive",
       });
-      if (fileInputRef.current) fileInputRef.current.value = ""; 
+      fileInputRef.current!.value = "";
       return;
     }
+  
     if (isDbConfigured === null) {
-        toast({ title: "Please wait", description: "Checking database configuration...", variant: "default"});
-        if (fileInputRef.current) fileInputRef.current.value = ""; 
-        return;
+      toast({ title: "Please wait", description: "Checking database configuration...", variant: "default" });
+      fileInputRef.current!.value = "";
+      return;
     }
-    
-    setIsLoading(true); 
-
+  
+    setIsLoading(true);
+  
     if (isDbConfigured) {
-      const storageUrl = await uploadImageToBackend(file, file.name);
+      const image = await uploadImageToBackend(file, file.name);
       setIsLoading(false);
-      if (storageUrl) {
-        const newImageEntry: NewGalleryImage = { dataUrl: storageUrl, prompt: `Uploaded: ${file.name}` };
-        try {
-          const savedImage = await saveImageToDb(newImageEntry);
-          if (savedImage) {
-              setGalleryImages(prev => [{...savedImage, createdAt: new Date(savedImage.createdAt)}, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-              toast({ title: "Image Uploaded", description: `${file.name} added to cloud gallery.` });
-          } else {
-              toast({ title: "Upload Error", description: `Could not save ${file.name} metadata to cloud gallery. Check server logs.`, variant: "destructive" });
-          }
-        } catch (e) {
-          console.error("Error saving uploaded image to DB:", e);
-          toast({ title: "Upload Error", description: "Could not save uploaded image metadata to database.", variant: "destructive" });
-        }
+  
+      if (image) {
+        const galleryImage: GalleryImage = {
+          id: image.id,
+          storageUrl: image.storageUrl,
+          prompt: image.prompt,
+          createdAt: image.createdAt,
+        };
+        setGalleryImages(prev => [galleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
+        toast({ title: "Image Uploaded", description: `${file.name} added to cloud gallery.` });  
       } else {
-         toast({ title: "Storage Error", description: `Could not upload ${file.name} to cloud storage.`, variant: "destructive" });
+        toast({ title: "Storage Error", description: `Could not upload ${file.name} to cloud storage.`, variant: "destructive" });
       }
-    } else { 
+    } else {
       setIsLoading(false);
-      console.log("Database not configured, saving uploaded image dataURL to localStorage.");
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const dataUrl = reader.result as string;
-        try {
-          const localDataUrls: string[] = JSON.parse(localStorage.getItem(LOCAL_STORAGE_GALLERY_KEY) || '[]');
-          const updatedLocalDataUrls = [dataUrl, ...localDataUrls].slice(0, MAX_GALLERY_IMAGES || undefined);
-          localStorage.setItem(LOCAL_STORAGE_GALLERY_KEY, JSON.stringify(updatedLocalDataUrls));
-
-          const localGalleryImage: GalleryImage = {
-              id: `local-upload-${Date.now()}`,
-              dataUrl,
-              prompt: `Uploaded: ${file.name}`,
-              createdAt: new Date(),
-          };
-          setGalleryImages(prev => [localGalleryImage, ...prev].slice(0, MAX_GALLERY_IMAGES || undefined));
-          toast({ title: "Image Uploaded Locally", description: `${file.name} added to local gallery as DB is not configured.` });
-        } catch (localError) {
-          console.error("Error saving uploaded image to localStorage:", localError);
-          toast({ title: "Local Storage Error", description: "Could not save uploaded image to local storage.", variant: "destructive" });
-        }
-      };
-      reader.onerror = () => {
-        toast({ title: "Upload Error", description: "Failed to read the image file for local storage.", variant: "destructive"});
-      };
-      reader.readAsDataURL(file);
+      toast({ title: "Database Not Configured", description: "Local fallback not supported in this context.", variant: "destructive" });
     }
-    if (fileInputRef.current) fileInputRef.current.value = ""; 
+  
+    fileInputRef.current!.value = ""; // Clear file input
   };
 
 
@@ -705,6 +710,119 @@ export function ImageGeneratorForm() {
     "Use names of artists to guide the style.",
     "Combine concepts: 'a cat astronaut on Mars'.",
   ];
+
+  const renderedGalleryImages = useMemo(() => {
+    return galleryImages.map((imgEntry, index) => (
+      <div
+        key={imgEntry.id}
+        className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200 cursor-pointer"
+        onClick={() => {
+          if (!imgEntry.storageUrl) {
+            toast({
+              title: "Missing Image URL",
+              description: "This gallery image has no storage URL.",
+              variant: "destructive",
+            });
+            return;
+          }
+  
+          const img = new window.Image();
+          
+          img.onload = () => {
+            setOriginalImageDimensions({ width: img.width, height: img.height });
+  
+            if (previewContainerRef.current) {
+              const containerWidth = previewContainerRef.current.offsetWidth;
+              const containerHeight = previewContainerRef.current.offsetHeight;
+              const aspectRatio = img.width / img.height;
+              let newWidth = containerWidth;
+              let newHeight = newWidth / aspectRatio;
+              if (newHeight > containerHeight) {
+                newHeight = containerHeight;
+                newWidth = newHeight * aspectRatio;
+              }
+              setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
+            } else {
+              setDisplayDimensions({ width: img.width, height: img.height });
+            }
+  
+            setIsCropping(false);
+            setCropArea(null);
+            setIsResizing(false);
+            setResizeHandle(null);
+            setPrompt(imgEntry.prompt || '');
+            setGeneratedImageBlobUrl(null);
+            setCurrentDisplayUrl(imgEntry.storageUrl);
+          };
+  
+          img.onerror = () => {
+            toast({
+              title: "Gallery Load Error",
+              description: "Could not load selected image.",
+              variant: "destructive",
+            });
+          };
+  
+          img.crossOrigin = "anonymous";
+          img.src = imgEntry.storageUrl;
+        }}
+      >
+        <Image
+          src={imgEntry.storageUrl}
+          alt={imgEntry.prompt || `Gallery image ${index + 1}`}
+          fill
+          sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, (max-width: 1279px) 15vw, 12vw"
+          className="object-cover"
+          data-ai-hint="gallery art"
+          priority={index < 4}
+          onError={(e) => {
+            console.warn(`Failed to load gallery image: ${imgEntry.id}`);
+            (e.target as HTMLImageElement).src = 'https://picsum.photos/200/200?grayscale&blur=2';
+          }}
+        />
+      </div>
+    ));
+  }, [galleryImages, toast, previewContainerRef]);
+
+
+  const memoizedStaticImage = useMemo(() => {
+    if (
+      !currentDisplayUrl ||
+      !originalImageDimensions ||
+      !displayDimensions.width ||
+      !displayDimensions.height
+    ) return null;
+  
+    return (
+      <Image
+        key={currentDisplayUrl}
+        ref={imageRef}
+        src={currentDisplayUrl}
+        alt={prompt || 'Generated AI image'}
+        width={displayDimensions.width}
+        height={displayDimensions.height}
+        className="object-contain select-none"
+        priority
+        draggable={false}
+        onDragStart={(e) => e.preventDefault()}
+        onError={() => {
+          toast({
+            title: "Image Load Error",
+            description: "Could not display current image.",
+            variant: "destructive",
+          });
+          setCurrentDisplayUrl(null);
+        }}
+      />
+    );
+  }, [
+    currentDisplayUrl,
+    originalImageDimensions,
+    displayDimensions.width,
+    displayDimensions.height,
+    prompt,
+    toast,
+  ]);
   
   return (
     <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
@@ -769,52 +887,45 @@ export function ImageGeneratorForm() {
                   </div>
                 )}
                 {!isLoading && currentDisplayUrl && originalImageDimensions && (
-                  <div style={{ width: displayDimensions.width, height: displayDimensions.height }} className="relative"> 
-                    <Image
-                        ref={imageRef}
-                        src={currentDisplayUrl}
-                        alt={prompt || 'Generated AI image'}
-                        width={displayDimensions.width} 
-                        height={displayDimensions.height} 
-                        className="object-contain select-none" 
-                        data-ai-hint="generated art"
-                        priority 
-                        draggable={false}
-                        onDragStart={(e) => e.preventDefault()} 
-                        onError={() => {
-                            toast({title:"Image Load Error", description: "Could not display current image.", variant:"destructive"});
-                            setCurrentDisplayUrl(null); 
+                  <div
+                    style={{
+                      width: displayDimensions.width,
+                      height: displayDimensions.height,
+                    }}
+                    className="relative"
+                  >
+                    {memoizedStaticImage}
+
+                    {isCropping && cropArea && (
+                      <div
+                        className="absolute border-2 border-dashed border-primary bg-primary/20 cursor-move"
+                        style={{
+                          left: cropArea.displayX,
+                          top: cropArea.displayY,
+                          width: cropArea.displayWidth,
+                          height: cropArea.displayHeight,
+                          touchAction: 'none',
                         }}
+                        onMouseDown={(e) => handleMouseDown(e, 'crop')}
+                      >
+                        <div onMouseDown={(e) => handleMouseDown(e, 'crop-tl')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background" style={{ touchAction: 'none' }}></div>
+                        <div onMouseDown={(e) => handleMouseDown(e, 'crop-tr')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{ touchAction: 'none' }}></div>
+                        <div onMouseDown={(e) => handleMouseDown(e, 'crop-bl')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{ touchAction: 'none' }}></div>
+                        <div onMouseDown={(e) => handleMouseDown(e, 'crop-br')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background" style={{ touchAction: 'none' }}></div>
+                      </div>
+                    )}
+
+                    {isResizing && resizeHandle && (
+                      <div
+                        className="absolute w-4 h-4 bg-primary rounded-full cursor-nwse-resize border-2 border-background"
+                        style={{
+                          left: resizeHandle.x - 2,
+                          top: resizeHandle.y - 2,
+                          touchAction: 'none',
+                        }}
+                        onMouseDown={(e) => handleMouseDown(e, 'resize')}
                       />
-                      {isCropping && cropArea && (
-                        <div
-                            className="absolute border-2 border-dashed border-primary bg-primary/20 cursor-move"
-                            style={{ 
-                                left: cropArea.displayX, 
-                                top: cropArea.displayY, 
-                                width: cropArea.displayWidth, 
-                                height: cropArea.displayHeight,
-                                touchAction: 'none', 
-                            }}
-                            onMouseDown={(e) => handleMouseDown(e, 'crop')}
-                        >
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tl')} className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background" style={{touchAction: 'none'}}></div>
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-tr')} className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{touchAction: 'none'}}></div>
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-bl')} className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-primary rounded-full cursor-nesw-resize border-2 border-background" style={{touchAction: 'none'}}></div>
-                            <div onMouseDown={(e) => handleMouseDown(e, 'crop-br')} className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-primary rounded-full cursor-nwse-resize border-2 border-background" style={{touchAction: 'none'}}></div>
-                        </div>
-                      )}
-                      {isResizing && resizeHandle && (
-                        <div
-                            className="absolute w-4 h-4 bg-primary rounded-full cursor-nwse-resize border-2 border-background"
-                            style={{
-                                left: resizeHandle.x -2, 
-                                top: resizeHandle.y -2,
-                                touchAction: 'none',
-                            }}
-                            onMouseDown={(e) => handleMouseDown(e, 'resize')}
-                        />
-                      )}
+                    )}
                   </div>
                 )}
                 {!isLoading && !currentDisplayUrl && (
@@ -903,56 +1014,9 @@ export function ImageGeneratorForm() {
                     <p className="text-muted-foreground text-center py-4">Your gallery is empty. Add some generated or uploaded images!</p>
                 )}
                 {isDbConfigured !== null && galleryImages.length > 0 && (
-                    <div className="grid grid-cols-2 gap-4">
-                    {galleryImages.map((imgEntry, index) => (
-                        <div 
-                            key={imgEntry.id} 
-                            className="relative aspect-square bg-muted/10 rounded-lg overflow-hidden border-2 border-input shadow-md hover:shadow-xl hover:ring-2 hover:ring-primary/40 focus-within:ring-2 focus-within:ring-primary/40 transition-all duration-200 cursor-pointer"
-                            onClick={() => {
-                                setCurrentDisplayUrl(imgEntry.dataUrl);
-                                const img = new window.Image();
-                                img.onload = () => {
-                                     setOriginalImageDimensions({ width: img.width, height: img.height });
-                                     if (previewContainerRef.current) {
-                                        const containerWidth = previewContainerRef.current.offsetWidth;
-                                        const containerHeight = previewContainerRef.current.offsetHeight;
-                                        const aspectRatio = img.width / img.height;
-                                        let newWidth = containerWidth;
-                                        let newHeight = newWidth / aspectRatio;
-                                        if (newHeight > containerHeight) {
-                                            newHeight = containerHeight;
-                                            newWidth = newHeight * aspectRatio;
-                                        }
-                                        setDisplayDimensions({ width: Math.round(newWidth), height: Math.round(newHeight) });
-                                    } else {
-                                       setDisplayDimensions({ width: img.width, height: img.height });
-                                    }
-                                    setIsCropping(false); setCropArea(null); 
-                                    setIsResizing(false); setResizeHandle(null);
-                                    setPrompt(imgEntry.prompt || ''); 
-                                    setGeneratedImageBlobUrl(null); 
-                                }
-                                img.onerror = () => toast({title: "Gallery Load Error", description: "Could not load selected image.", variant:"destructive"});
-                                img.crossOrigin = "anonymous"; 
-                                img.src = imgEntry.dataUrl;
-                            }}
-                        >
-                          <Image 
-                              src={imgEntry.dataUrl} 
-                              alt={imgEntry.prompt || `Gallery image ${index + 1}`}
-                              fill
-                              sizes="(max-width: 767px) 40vw, (max-width: 1023px) 20vw, (max-width: 1279px) 15vw, 12vw" 
-                              className="object-cover"
-                              data-ai-hint="gallery art"
-                              priority={index < 4}
-                              onError={(e) => {
-                                console.warn(`Failed to load gallery image: ${imgEntry.id}`);
-                                (e.target as HTMLImageElement).src = 'https://picsum.photos/200/200?grayscale&blur=2'; 
-                              }}
-                            />
-                        </div>
-                    ))}
-                    </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {renderedGalleryImages}
+                  </div>
                 )}
                 </CardContent>
             </Card>
