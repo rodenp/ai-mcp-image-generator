@@ -17,10 +17,10 @@ import { useToast } from '@/hooks/use-toast';
 import { saveImageToDb, getImagesFromDb, isDatabaseEffectivelyConfigured } from '@/lib/db/actions';
 import type { GalleryImage, NewGalleryImage } from '@/lib/db/types';
 
-
 const MAX_GALLERY_IMAGES = 20; 
 const LOCAL_STORAGE_GALLERY_KEY = 'aiImageGalleryDataUrls'; // For non-DB fallback
-const BACKEND_UPLOAD_URL = 'http://localhost:9003/upload-image'; // New backend URL
+const base_url = process.env.NEXT_PUBLIC_BACKEND_BASE_URL;
+const BACKEND_UPLOAD_URL = `${base_url}/upload-image`; // New backend URL
 
 // Helper function to convert data URL to File object
 async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
