@@ -235,7 +235,7 @@ export function ImageGeneratorForm() {
         canvas.height = canvasHeight;
         ctx.clearRect(0,0, canvasWidth, canvasHeight); // Clear canvas before drawing
         operation(ctx, img, originalImageDimensions); 
-        resolve(canvas.tostorageUrl('image/png'));
+        resolve(canvas.toDataURL('image/png'));
       };
       img.onerror = () => reject(new Error("Failed to load image for canvas operation"));
       img.crossOrigin = "anonymous"; 
@@ -294,8 +294,7 @@ export function ImageGeneratorForm() {
   const handleApplyCrop = async () => {
     if (!currentDisplayUrl || !cropArea || !originalImageDimensions || !imageRef.current) return;
   
-    const naturalWidth = imageRef.current.naturalWidth;
-    const naturalHeight = imageRef.current.naturalHeight;
+    const { width: naturalWidth, height: naturalHeight } = originalImageDimensions;
     const displayToNaturalRatioX = naturalWidth / displayDimensions.width;
     const displayToNaturalRatioY = naturalHeight / displayDimensions.height;
   
@@ -827,7 +826,7 @@ export function ImageGeneratorForm() {
   return (
     <div className="w-full pt-8 pb-12 flex flex-col flex-grow">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-6 gap-y-8 flex-grow px-1 sm:px-2 lg:px-2">
-        <div className="space-y-6 lg:col-span-4 xl:col-span-3"> 
+        <div className="space-y-6 lg:col-span-5 xl:col-span-4"> 
           <Card className="shadow-lg">
             <CardHeader><CardTitle>Enter your prompt</CardTitle></CardHeader>
             <CardContent>
@@ -858,7 +857,7 @@ export function ImageGeneratorForm() {
           </Card>
         </div>
 
-        <div className="space-y-6 lg:col-span-5 xl:col-span-6 flex flex-col"> 
+        <div className="space-y-6 lg:col-span-4 xl:col-span-5 flex flex-col"> 
           <Card className="shadow-lg flex-grow flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Generated Image</CardTitle>
